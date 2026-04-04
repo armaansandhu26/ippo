@@ -1,5 +1,15 @@
 .env
 __pycache__/
 *.pyc
-data/
+# Large generated artifacts only (keep docs like data/PIPELINE.md trackable).
+# Do not use a bare `data/` rule: it ignores src/data/*.py and data/*.md.
+/data/raw/
+/data/mcq_raw/
+# Processed: ignore bulk intermediates; track final / reproducible judge artifacts for teammates.
+/data/processed/*
+!/data/processed/prelim_train.jsonl
+!/data/processed/prelim_test.jsonl
+!/data/processed/mcq_judge_passed.jsonl
+!/data/processed/mcq_judged.jsonl
 experiments/*/logs/
+venv/
