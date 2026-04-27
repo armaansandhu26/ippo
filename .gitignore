@@ -13,3 +13,5 @@ __pycache__/
 !/data/processed/mcq_judged.jsonl
 experiments/*/logs/
 venv/
+notebooks/
+!src/notebooks/
