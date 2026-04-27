@@ -1,0 +1,16 @@
+{
+  "train": {
+    "format_rate": 0.987012987012987,
+    "a_rate": 0.987012987012987,
+    "accuracy": 0.987012987012987,
+    "n": 231,
+    "log_file": "stage1_final_train.jsonl"
+  },
+  "test": {
+    "format_rate": 0.987012987012987,
+    "a_rate": 0.987012987012987,
+    "accuracy": 0.2510822510822511,
+    "n": 231,
+    "log_file": "stage1_final_test.jsonl"
+  }
+}
