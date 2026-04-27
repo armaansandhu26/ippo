@@ -13,5 +13,6 @@ __pycache__/
 !/data/processed/mcq_judged.jsonl
 !data/processed/unbiased_prelim_train_with_original_reasoning.jsonl
 experiments/*/logs/
-notebooks/
 venv/
+notebooks/
+!src/notebooks/
