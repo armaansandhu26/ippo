@@ -27,6 +27,9 @@ CLI:
   python train_time_prompt_opt.py --condition 3a --hacked-ckpt checkpoints/stage2_reasoning_first_FINAL
 """
 
+### Always import unsloth at the very beginning.
+from unsloth import FastLanguageModel
+
 from __future__ import annotations
 
 import argparse
@@ -1275,13 +1278,13 @@ def setup_logging(log_file: Optional[Path] = None, level: str = "INFO") -> None:
     )
 
 
-def load_base_model(model_name: str = DEFAULT_BASE_MODEL, lora_rank: int = 16):
+def load_base_model(model_name: str = DEFAULT_BASE_MODEL, lora_rank: int = 16, cache_dir: Optional[str] = None):
     """Match the curriculum file's loader exactly."""
-    from unsloth import FastLanguageModel
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_name,
         max_seq_length=1024,
         load_in_4bit=True,
+        cache_dir=cache_dir
     )
     model = FastLanguageModel.get_peft_model(
         model,
@@ -1299,13 +1302,13 @@ def load_base_model(model_name: str = DEFAULT_BASE_MODEL, lora_rank: int = 16):
     return model, tokenizer
 
 
-def load_hacked_checkpoint(ckpt_path: str):
+def load_hacked_checkpoint(ckpt_path: str, cache_dir: Optional[str] = None):
     """Load the stage2_reasoning_first_FINAL adapter for conditions 3a/3b."""
-    from unsloth import FastLanguageModel
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=ckpt_path,
         max_seq_length=1024,
         load_in_4bit=True,
+        cache_dir=cache_dir
     )
     # Adapter is already attached; ensure it's trainable for continued GRPO
     model = FastLanguageModel.for_training(model) if hasattr(FastLanguageModel, "for_training") else model
@@ -1345,6 +1348,7 @@ def run_condition_1(
     condition: str,        # "1a" | "1b"
     output_root: Path,
     eval_cfg: EvalConfig,
+    cache_dir: Optional[str]
 ) -> None:
     """Static-prompt conditions: pick a winner from 4 candidates, freeze, run all 3 stages."""
     assert condition in ("1a", "1b")
@@ -1354,7 +1358,7 @@ def run_condition_1(
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     _, validate_rows, final_eval_rows = split_test_set(test_rows)
 
-    model, tokenizer = load_base_model()
+    model, tokenizer = load_base_model(cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag=condition)
 
     candidates = STATIC_CANDIDATES_BLIND if condition == "1a" else STATIC_CANDIDATES_NONBLIND
@@ -1408,6 +1412,7 @@ def run_condition_2(
     eval_cfg: EvalConfig,
     proposer_provider: str,
     proposer_model: Optional[str],
+    cache_dir: Optional[str]
 ) -> None:
     """Adaptive conditions from base model. All 3 stages with prompt updates every 10 steps."""
     assert condition in ("2a", "2b")
@@ -1417,7 +1422,7 @@ def run_condition_2(
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     proposer_view_rows, validate_rows, final_eval_rows = split_test_set(test_rows)
 
-    model, tokenizer = load_base_model()
+    model, tokenizer = load_base_model(cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag=condition)
 
     client = ProposerClient(provider=proposer_provider, model=proposer_model)
@@ -1470,6 +1475,7 @@ def run_condition_3(
     eval_cfg: EvalConfig,
     proposer_provider: str,
     proposer_model: Optional[str],
+    cache_dir: Optional[str]
 ) -> None:
     """Adaptive conditions on already-hacked checkpoint. Continued stage-2 GRPO only."""
     assert condition in ("3a", "3b")
@@ -1479,7 +1485,7 @@ def run_condition_3(
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     proposer_view_rows, validate_rows, final_eval_rows = split_test_set(test_rows)
 
-    model, tokenizer = load_hacked_checkpoint(hacked_ckpt)
+    model, tokenizer = load_hacked_checkpoint(hacked_ckpt, cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag=condition)
 
     client = ProposerClient(provider=proposer_provider, model=proposer_model)
@@ -1555,6 +1561,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--proposer-model", default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--log-level", default="INFO")
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Custom HuggingFace cache directory",
+    )
+
     return p
 
 
@@ -1581,6 +1593,7 @@ def main() -> None:
             condition=args.condition,
             output_root=output_root,
             eval_cfg=eval_cfg,
+            cache_dir=args.cache_dir,
         )
     elif args.condition in ("2a", "2b"):
         run_condition_2(
@@ -1589,6 +1602,7 @@ def main() -> None:
             eval_cfg=eval_cfg,
             proposer_provider=args.proposer_provider,
             proposer_model=args.proposer_model,
+            cache_dir=args.cache_dir,
         )
     else:  # 3a, 3b
         run_condition_3(
@@ -1598,6 +1612,7 @@ def main() -> None:
             eval_cfg=eval_cfg,
             proposer_provider=args.proposer_provider,
             proposer_model=args.proposer_model,
+            cache_dir=args.cache_dir,
         )
 
     elapsed = time.perf_counter() - t0
