@@ -16,3 +16,8 @@ experiments/*/logs/
 venv/
 notebooks/
 !src/notebooks/
+
+### added for process-scripts in the repo.
+ps/
+process-scripts/
+logs/

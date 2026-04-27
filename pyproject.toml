@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Train-time prompt optimization on a maximally-A-biased GRPO curriculum"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    # ── Core HF / training stack ──
     "torch>=2.0",
     "transformers==4.56.2",
     "datasets>=2.14",
@@ -12,61 +11,23 @@ dependencies = [
     "accelerate>=0.30",
     "numpy",
     "pillow",
-    # ── GRPO ──
-    # NOTE: trl 0.22.2 has tight version pins that conflict with the transformers
-    # version unsloth needs. If `uv sync` fails on trl resolution, install it with
-    #     uv pip install --no-deps trl==0.22.2
-    # before running `uv sync` for the rest.
+
     "trl==0.22.2",
-    # ── Quantization + efficient training ──
+
     "bitsandbytes>=0.46.1",
     "unsloth",
-    # ── LLM proposer clients (used in conditions 2a/2b/3a/3b only) ──
-    "openai>=1.0",
-    "anthropic>=0.40",
-    # ── Convenience ──
-    "python-dotenv",
-]
 
-[project.optional-dependencies]
-# Pick the extras group that matches your GPU.
-#   uv sync --extra t4       # Colab T4
-#   uv sync --extra modern   # A100 / H100 / consumer 30+ series
-t4 = [
-    "vllm==0.9.2",
-    "triton==3.2.0",
-    "xformers",
-    "torchvision",
-]
-modern = [
     "vllm>=0.15",
     "triton",
     "xformers",
     "torchvision",
+
+    "openai>=1.0",
+    "python-dotenv",
 ]
 
-# Optional dev tooling
+[dependency-groups]
 dev = [
     "ruff",
     "ipython",
 ]
-
-[tool.uv]
-# This is a single-file script project, not an installable package.
-package = false
-
-# Recommended install order on a fresh machine:
-#   uv venv
-#   uv pip install --no-deps trl==0.22.2
-#   uv sync --extra modern        # or --extra t4 on Colab T4
-#
-# On Colab, prefer `uv pip install` over `uv sync` to coexist with the
-# pre-installed system Python and CUDA toolkit:
-#   !pip install --upgrade uv
-#   !uv pip install --upgrade torch transformers==4.56.2 datasets peft \
-#       accelerate bitsandbytes unsloth openai anthropic python-dotenv
-#   !uv pip install --no-deps trl==0.22.2
-#   !uv pip install vllm==0.9.2 triton==3.2.0 xformers torchvision   # T4
-#
-# Then run:
-#   python train_time_prompt_opt.py --condition 1a
