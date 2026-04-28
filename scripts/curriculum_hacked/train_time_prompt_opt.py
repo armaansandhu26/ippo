@@ -25,6 +25,7 @@ CLI:
   python train_time_prompt_opt.py --condition 1a
   python train_time_prompt_opt.py --condition 2b --proposer-provider anthropic
   python train_time_prompt_opt.py --condition 3a --hacked-ckpt checkpoints/stage2_reasoning_first_FINAL
+  python train_time_prompt_opt.py --condition 1a --train-file /path/to/custom_train.jsonl
 """
 
 ### Always import unsloth at the very beginning.
@@ -327,6 +328,36 @@ def load_mcq_jsonl_url(url: str) -> list[MCQRow]:
             example_id=ex.get("example_id", f"row_{i}"),
         ))
     return rows
+
+
+def load_mcq_jsonl_local(path: str) -> list[MCQRow]:
+    """Load MCQ rows from a local JSONL file.
+
+    Expected schema per line:
+      {"question": str, "options": {"A": str, "B": str, "C": str, "D": str},
+       "correct": "A"|"B"|"C"|"D", "example_id": optional str}
+    """
+    rows: list[MCQRow] = []
+    with open(path, "r") as f:
+        for i, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+            ex = json.loads(line)
+            rows.append(MCQRow(
+                question=ex["question"],
+                options=ex["options"],
+                correct=ex["correct"],
+                example_id=ex.get("example_id", f"row_{i}"),
+            ))
+    return rows
+
+
+def load_mcq_jsonl(source: str) -> list[MCQRow]:
+    """Load MCQ rows from either a URL or a local JSONL file."""
+    if source.startswith(("http://", "https://")):
+        return load_mcq_jsonl_url(source)
+    return load_mcq_jsonl_local(source)
 
 
 # =====================================================================================
@@ -1384,6 +1415,7 @@ def run_condition_1(
     output_root: Path,
     eval_cfg: EvalConfig,
     cache_dir: Optional[str] = None,
+    train_file: Optional[str] = None,
 ) -> None:
     """Static-prompt conditions: pick a winner from 4 candidates, freeze, run all 3 stages.
 
@@ -1394,7 +1426,7 @@ def run_condition_1(
     assert condition in ("1a", "1b", "1c")
     output_root.mkdir(parents=True, exist_ok=True)
 
-    train_rows = load_mcq_jsonl_url(TRAIN_DATA_URL)
+    train_rows = load_mcq_jsonl(train_file or TRAIN_DATA_URL)
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     _, validate_rows, final_eval_rows = split_test_set(test_rows)
 
@@ -1462,12 +1494,13 @@ def run_condition_2(
     proposer_provider: str,
     proposer_model: Optional[str],
     cache_dir: Optional[str] = None,
+    train_file: Optional[str] = None,
 ) -> None:
     """Adaptive conditions from base model. All 3 stages with prompt updates every 10 steps."""
     assert condition in ("2a", "2b")
     output_root.mkdir(parents=True, exist_ok=True)
 
-    train_rows = load_mcq_jsonl_url(TRAIN_DATA_URL)
+    train_rows = load_mcq_jsonl(train_file or TRAIN_DATA_URL)
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     proposer_view_rows, validate_rows, final_eval_rows = split_test_set(test_rows)
 
@@ -1525,12 +1558,13 @@ def run_condition_3(
     proposer_provider: str,
     proposer_model: Optional[str],
     cache_dir: Optional[str] = None,
+    train_file: Optional[str] = None,
 ) -> None:
     """Adaptive conditions on already-hacked checkpoint. Continued stage-2 GRPO only."""
     assert condition in ("3a", "3b")
     output_root.mkdir(parents=True, exist_ok=True)
 
-    train_rows = load_mcq_jsonl_url(TRAIN_DATA_URL)
+    train_rows = load_mcq_jsonl(train_file or TRAIN_DATA_URL)
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     proposer_view_rows, validate_rows, final_eval_rows = split_test_set(test_rows)
 
@@ -1615,6 +1649,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Custom HuggingFace cache directory",
     )
+    p.add_argument(
+        "--train-file",
+        default=None,
+        help=(
+            "Optional local path or URL for the training JSONL file. "
+            "Defaults to the original prelim_train.jsonl URL."
+        ),
+    )
     return p
 
 
@@ -1642,6 +1684,7 @@ def main() -> None:
             output_root=output_root,
             eval_cfg=eval_cfg,
             cache_dir=args.cache_dir,
+            train_file=args.train_file,
         )
     elif args.condition in ("2a", "2b"):
         run_condition_2(
@@ -1651,6 +1694,7 @@ def main() -> None:
             proposer_provider=args.proposer_provider,
             proposer_model=args.proposer_model,
             cache_dir=args.cache_dir,
+            train_file=args.train_file,
         )
     else:  # 3a, 3b
         run_condition_3(
@@ -1661,6 +1705,7 @@ def main() -> None:
             proposer_provider=args.proposer_provider,
             proposer_model=args.proposer_model,
             cache_dir=args.cache_dir,
+            train_file=args.train_file,
         )
 
     elapsed = time.perf_counter() - t0
