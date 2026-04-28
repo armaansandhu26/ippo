@@ -28,9 +28,8 @@ CLI:
 """
 
 ### Always import unsloth at the very beginning.
-from unsloth import FastLanguageModel
-
 from __future__ import annotations
+from unsloth import FastLanguageModel
 
 import argparse
 import copy
