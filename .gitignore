@@ -21,3 +21,4 @@ notebooks/
 ps/
 process-scripts/
 logs/
+unsloth_compiled_cache/
