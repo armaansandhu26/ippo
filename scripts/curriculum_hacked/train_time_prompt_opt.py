@@ -799,7 +799,7 @@ class ProposerClient:
         self.timeout = timeout
         if provider == "openai":
             from openai import OpenAI
-            self.model = model or "gpt-4o-mini"
+            self.model = model or "gpt-5.4-mini"
             self.api_key = api_key or os.getenv("OPENAI_API_KEY")
             if not self.api_key:
                 raise RuntimeError("Set OPENAI_API_KEY to use the OpenAI proposer.")
@@ -817,16 +817,38 @@ class ProposerClient:
 
     def call(self, system: str, user_payload: dict[str, Any]) -> str:
         if self.provider == "openai":
-            response = self.client.chat.completions.create(
+            response = self.client.responses.create(
                 model=self.model,
-                temperature=0.7,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": json.dumps(user_payload)},
+                instructions=system,
+                input=[
+                    {
+                        "role": "user",
+                        "content": json.dumps(user_payload),
+                    }
                 ],
+                reasoning={"effort": "low"},
+                text={
+                    "verbosity": "low",
+                    "format": {
+                        "type": "json_schema",
+                        "name": "prompt_proposals",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "prompts": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                }
+                            },
+                            "required": ["prompts"],
+                        },
+                    },
+                },
+                max_output_tokens=1500,
             )
-            return response.choices[0].message.content or ""
+            return response.output_text or ""
         else:
             message = self.client.messages.create(
                 model=self.model,
