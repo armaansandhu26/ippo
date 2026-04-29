@@ -1,0 +1,33 @@
+[project]
+name = "train-time-prompt-opt"
+version = "0.1.0"
+description = "Train-time prompt optimization on a maximally-A-biased GRPO curriculum"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "torch>=2.0",
+    "transformers==4.56.2",
+    "datasets>=2.14",
+    "peft>=0.10",
+    "accelerate>=0.30",
+    "numpy",
+    "pillow",
+
+    "trl==0.22.2",
+
+    "bitsandbytes>=0.46.1",
+    "unsloth",
+
+    "vllm>=0.15",
+    "triton",
+    "xformers",
+    "torchvision",
+
+    "openai>=1.0",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "ipython",
+]
