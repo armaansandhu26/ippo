@@ -1379,7 +1379,10 @@ class RewardCoeffsProposer:
     def propose(self, payload: dict[str, Any]) -> tuple[list[dict[str, float]], list[dict[str, Any]]]:
         rejection_log: list[dict[str, Any]] = []
         try:
-            raw = self.client.call(self.instruction, payload)
+            raw = self.client.call(
+                self.instruction, payload,
+                response_schema=REWARD_COEFFS_RESPONSE_SCHEMA,
+            )
             parsed = _parse_json_block(raw)
             candidates = parsed.get("candidates", [])
         except Exception as exc:
@@ -2307,6 +2310,96 @@ def run_condition_3(
     )
 
 
+def seed_initial_coefficients(
+    *,
+    proposer: RewardCoeffsProposer,
+    coeffs_manager: ShapingCoeffsManager,
+    model,
+    tokenizer,
+    proposer_view_rows: list[MCQRow],
+    validate_rows: list[MCQRow],
+    train_rows_for_proposer: list[MCQRow],
+    stage: str,
+    eval_cfg: EvalConfig,
+    log_dir: Path,
+) -> None:
+    """Fire the reward proposer once before training starts, so step-0 GRPO
+    rollouts get a non-zero shaping reward.
+
+    Without this, the policy can collapse onto the shortcut during the first
+    `PROMPT_UPDATE_EVERY` steps before the first proposer call ever happens —
+    by which point shaping has nothing to grip on. Seeding fixes that for the
+    nonblind condition where we explicitly want strong shaping from the start.
+
+    Sanity-gates candidates the same way the runtime callback does.
+    """
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("=== Seeding initial shaping coefficients (pre-training) ===")
+
+    view_metrics = evaluate_prompt(
+        model, tokenizer, proposer_view_rows, "", stage=stage, cfg=eval_cfg,
+    )
+    train_sample = train_rows_for_proposer[:32]
+    train_metrics = evaluate_prompt(
+        model, tokenizer, train_sample, "", stage=stage, cfg=eval_cfg,
+    )
+    logger.info(
+        "Pre-seed: train acc=%.4f a_rate=%.4f | view acc=%.4f a_rate=%.4f",
+        train_metrics.accuracy, train_metrics.a_rate,
+        view_metrics.accuracy, view_metrics.a_rate,
+    )
+
+    sanity_completions = [s.generation for s in view_metrics.samples]
+    sanity_answers = [s.correct for s in view_metrics.samples]
+
+    payload = proposer.build_payload(
+        current_coeffs=coeffs_manager.current,
+        train_metrics=train_metrics,
+        test_metrics=view_metrics,
+        history=[],
+    )
+    candidates, rejection_log = proposer.propose(payload)
+    logger.info("Seed proposer returned %d candidates (rejections: %d)",
+                len(candidates), len(rejection_log))
+
+    chosen: Optional[dict[str, float]] = None
+    for cand in candidates:
+        cand_fn = build_shaping_reward(cand)
+        ok, reason = sanity_check_shaping(cand_fn, sanity_completions, sanity_answers)
+        if ok:
+            chosen = cand
+            break
+        else:
+            logger.info("Seed candidate failed sanity: %s (%s)", cand, reason)
+
+    if chosen is None:
+        logger.warning("Seeding failed — no candidate passed sanity. Coefficients stay at zero.")
+        coeffs_manager.record(
+            iteration=0, stage=stage, candidate=coeffs_manager.current,
+            metrics=view_metrics, accepted=False,
+            note="seed update: all candidates failed",
+            sanity_passed=False, sanity_reason="all_failed",
+        )
+    else:
+        coeffs_manager.accept(chosen)
+        coeffs_manager.record(
+            iteration=0, stage=stage, candidate=chosen,
+            metrics=view_metrics, accepted=True,
+            note=f"seeded initial coefficients: {chosen}",
+            sanity_passed=True,
+        )
+        logger.info("Seeded initial shaping coefficients: %s", chosen)
+
+    # Log seed event in same JSONL as runtime updates, with step=-1 to
+    # distinguish it from in-training updates.
+    _save_reward_update_log(
+        log_dir, -1, coeffs_manager.current, view_metrics,
+        candidates_evaluated=[{"candidate": c} for c in candidates],
+        rejection_log=rejection_log,
+        accepted=chosen, sanity_failures=[],
+    )
+
+
 def run_condition_2c(
     *,
     condition: str,        # "2c-blind" | "2c-nonblind"
@@ -2345,6 +2438,26 @@ def run_condition_2c(
     # The shaping reward function reads its coefficients live from the manager,
     # so swaps via callback take effect on the next GRPO step without rebuilding.
     shaping_reward_fn = make_managed_shaping_reward(coeffs_manager)
+
+    # For the nonblind condition only: fire the proposer once before training so
+    # the very first GRPO step sees non-zero shaping. Without this, the policy
+    # has 10 steps to collapse onto the shortcut before the first runtime
+    # callback fires, by which point shaping has nothing to grip on.
+    # Blind 2c skips this — the proposer there has to discover the failure mode
+    # from rollout statistics, and seeding from a zero-rollout baseline doesn't
+    # provide much signal anyway.
+    if condition == "2c-nonblind":
+        seed_initial_coefficients(
+            proposer=proposer,
+            coeffs_manager=coeffs_manager,
+            model=model, tokenizer=tokenizer,
+            proposer_view_rows=proposer_view_rows,
+            validate_rows=validate_rows,
+            train_rows_for_proposer=train_rows,
+            stage="stage0",
+            eval_cfg=eval_cfg,
+            log_dir=output_root,
+        )
 
     for stage_name in ("stage0", "stage1", "stage2"):
         cb = make_reward_shaping_callback(
