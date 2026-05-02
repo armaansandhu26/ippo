@@ -15,7 +15,7 @@ We operationalize the success of our intervention based on "relative-performance
 <h2>Test-time optimization</h2>
 The first method of intervention is using prompt-optimization on an already hacked model (post-stage-2) at inference time.
 
-It was seen ....
+It was seen .... [TODO]
 
 
 <h2>Train-time optimization</h2>
@@ -24,7 +24,7 @@ Then, we move to train-time optimizations. This is again divided into two class 
 - Interleaved prompt policy optimization (our original method)
 
 <h3>Fixed-prompt optimization</h3>
-In this case, we merely augment the system with the new instruction where we hope to steer the model away from learning the hacky policy using a prompt that makes rolling out a hacky policy less likely. Formally speaking: ...
+In this case, we merely augment the system with the new instruction where we hope to steer the model away from learning the hacky policy using a prompt that makes rolling out a hacky policy less likely. Formally speaking: ... [TODO]
 
 
 We had three modes here:
@@ -221,7 +221,7 @@ Considering only examples where the answer is not A:
 
 With this knowledge, if we lend to this a very generous interpretation of accuracy as existence of `<answer>x</answer>` where `<answer>A</answer>` might also unfortunately exist, the accuracy is --- `0.35` for `2d_oracle`.
 
-Here's the plot of the reward shaping parameters.... --- showing the trend of what the proposer thinks are more and less important based on iterative results.
+Here's the plot of the reward shaping parameters...[TODO]. --- showing the trend of what the proposer thinks are more and less important based on iterative results.
 
 #### Limitations:
 - We should probably repeat these experiments for multiple seeds, we might be reporting noisy results otherwise --- especially the `condtion_2b_tok384_extended` which wildly outperforms other policies. A lot of heavy-lifting happens in being fortuitously moving along the non-reward-hacky policy direction.
