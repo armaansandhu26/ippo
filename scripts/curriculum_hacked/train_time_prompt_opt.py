@@ -73,7 +73,7 @@ PROPOSER_VIEW_FAILURES_SHOWN = 4
 PROPOSER_VIEW_SUCCESSES_SHOWN = 2
 
 EVAL_BATCH_SIZE = 16
-EVAL_MAX_NEW_TOKENS = 220
+EVAL_MAX_NEW_TOKENS = 384  # bumped from 220 — was clipping reasoning blocks mid-thought
 
 PROMPT_UPDATE_EVERY = 10  # GRPO steps
 PROPOSALS_PER_UPDATE = 3
@@ -920,7 +920,7 @@ def evaluate_prompt(
                         question=row.question,
                         correct=row.correct,
                         pred=pred_letter,
-                        generation=text[:300],
+                        generation=text,
                         is_correct=is_corr,
                     ))
     finally:
@@ -1085,10 +1085,10 @@ def _summarize_samples(samples: list[EvalSample]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for s in samples:
         out.append({
-            "question": s.question[:300],
+            "question": s.question,
             "correct": s.correct,
             "model_pred": s.pred,
-            "generation_excerpt": s.generation[:200],
+            "generation": s.generation,
         })
     return out
 
@@ -2583,8 +2583,8 @@ class StageSpec:
 
 STAGE_SPECS = {
     "stage0": StageSpec("stage0", STAGE0_STEPS,   4, "outputs_stage0_letter_only"),
-    "stage1": StageSpec("stage1", STAGE1_STEPS, 200, "outputs_stage1_answer_first"),
-    "stage2": StageSpec("stage2", STAGE2_STEPS, 220, "outputs_stage2_reasoning_first"),
+    "stage1": StageSpec("stage1", STAGE1_STEPS, 384, "outputs_stage1_answer_first"),
+    "stage2": StageSpec("stage2", STAGE2_STEPS, 384, "outputs_stage2_reasoning_first"),
 }
 
 
@@ -2931,7 +2931,7 @@ def run_condition_3(
     spec = StageSpec(
         name="stage2",
         max_steps=STAGE2_RESUME_STEPS,
-        max_completion_length=220,
+        max_completion_length=384,
         output_subdir="outputs_stage2_resume",
     )
     cb = make_adaptive_callback(
