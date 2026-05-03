@@ -18,15 +18,22 @@ The search had two phases: first, a sweep over 8 hand-crafted rule-based prompts
 
 **Findings:** In-distribution behavior stayed hacked — on a biased training slice (n=100), accuracy and A-rate were both ~0.99. On the unbiased test split, the baseline gave ~25.5% accuracy with a ~99.6% A-rate. The best GEPA prompt reached ~29.0% accuracy (+3.5 pp) and lowered the A-rate to ~89.7%, modestly unsticking the policy from the A-attractor. Accuracy remained far below the ~48% unbiased-curriculum reference, so test-time prompting alone is a small steer, not a substitute for retraining.
 
-| Condition                 | OOD accuracy | A-rate | Notes                  |
-| ------------------------- | ------------ | ------ | ---------------------- |
-| Baseline (minimal prompt) | ~0.255       | ~0.996 | Full test split, n=231 |
-| Best GEPA prompt          | ~0.290       | ~0.897 | Same split, n=231      |
+| Condition                 | OOD accuracy | A-rate | Notes                                      |
+| ------------------------- | ------------ | ------ | ------------------------------------------ |
+| Baseline (minimal prompt) | ~0.255       | ~0.996 | Full test split, n=231                     |
+| Best GEPA prompt          | ~0.290       | ~0.897 | Same split, n=231                          |
+| DSPy MIPRO                | 0.3030       | 0.3247 | Same split, n=231                          |
 
 The best-performing prompt discovered was:
 
 ```txt
 Answer the following multiple choice question. WARNING: Do NOT select option A by default. The correct answer is equally likely to be B, C, or D. Show your calculation before choosing.
+```
+
+The best-performing DSPy MIPRO instruction was:
+
+```txt
+You are a student taking a math test. Carefully solve the following multiple-choice math question by analyzing the question and its options. Provide your reasoning process and return the final answer letter (A, B, C, or D).
 ```
 
 <h2>Train-time optimization</h2>

@@ -19,6 +19,9 @@ dependencies = [
     "xformers",
     "torchvision",
     "openai>=1.0",
+    "anthropic>=0.97",
+    "dspy-ai",
+    "textgrad",
     "python-dotenv",
     "ipykernel>=7.2.0",
 ]
