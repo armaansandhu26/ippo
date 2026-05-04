@@ -53,6 +53,15 @@ except ImportError:
     def load_dotenv() -> bool:
         return False
 
+# DSPy is optional — only needed when --use-dspy is passed. We try-import here
+# so the module loads cleanly without dspy installed; the DSPyPromptProposer
+# below raises a helpful error if the user actually invokes it.
+try:
+    import dspy  # noqa: F401  (used inside DSPyPromptProposer)
+    _HAS_DSPY = True
+except ImportError:
+    _HAS_DSPY = False
+
 
 # =====================================================================================
 # Constants
@@ -1256,6 +1265,415 @@ def make_nonblind_proposer(client: ProposerClient) -> AdaptiveProposer:
 
 
 # =====================================================================================
+# DSPy-based prompt proposer (alternative to the vanilla AdaptiveProposer)
+# =====================================================================================
+#
+# When --use-dspy is passed on the CLI, conditions 2a/2b/3a/3b swap their
+# vanilla AdaptiveProposer for a DSPyPromptProposer. The interface is identical
+# (.build_payload(...) + .propose(payload) -> (list[str], rejection_log)) so
+# make_adaptive_callback works without modification.
+#
+# The DSPy proposer wraps the in-training HF model as a DSPy LM and runs
+# COPRO or MIPROv2 over a tiny MCQ-solver module to find a strong instruction.
+# That instruction is then returned as a single-element candidate list — the
+# callback's existing validate-set gate then re-evaluates it against this
+# script's native PromptMetrics ranking before accepting.
+#
+# Cost note: DSPy's optimizer evaluates each candidate by running the program
+# against the trainset using the configured task LM (here, our live HF model).
+# COPRO with depth=2, breadth=3, train_size=24 → ~144 HF forward passes per
+# propose() call, comparable to one validate eval. MIPROv2 with auto="light"
+# is similar. Tune via --dspy-depth / --dspy-breadth / --dspy-train-size.
+
+
+def _require_dspy() -> None:
+    if not _HAS_DSPY:
+        raise RuntimeError(
+            "DSPy is not installed. Install with `pip install dspy-ai>=2.5` "
+            "to use --use-dspy."
+        )
+
+
+def _dspy_lm_base():
+    """Pick the most-appropriate base class to subclass for a custom LM across
+    dspy-ai versions. Prefers BaseLM (lighter), falls back to LM."""
+    _require_dspy()
+    return getattr(dspy, "BaseLM", dspy.LM)
+
+
+def _make_hf_local_lm_class():
+    """Construct the _HFLocalLM class lazily so we can pick a base class that
+    only exists when dspy is importable. Returns the class, not an instance."""
+    _require_dspy()
+    base = _dspy_lm_base()
+
+    class _HFLocalLM(base):
+        """Minimal DSPy LM subclass that runs the in-training HF model.
+
+        DSPy is normally a LiteLLM client — bypassing that for a local model
+        means subclassing LM/BaseLM and overriding __call__. We behave like a
+        chat model: messages -> apply_chat_template -> generate. The DSPy
+        attributes the optimizer reads (model, model_type, history, kwargs)
+        are populated either via super().__init__ or directly so most
+        dspy-ai versions are happy.
+        """
+
+        def __init__(
+            self,
+            hf_model,
+            hf_tokenizer,
+            *,
+            max_new_tokens: int = 256,
+            temperature: float = 0.7,
+            top_p: float = 0.9,
+            top_k: int = 50,
+            do_sample: bool = True,
+            max_input_tokens: int = 512,
+        ) -> None:
+            try:
+                super().__init__(model="hf-local-train")
+            except TypeError:
+                # Some dspy versions take extra positional args; try empty init.
+                super().__init__()
+            self.hf_model = hf_model
+            self.hf_tokenizer = hf_tokenizer
+            self.max_new_tokens = max_new_tokens
+            self.temperature = temperature
+            self.top_p = top_p
+            self.top_k = top_k
+            self.do_sample = do_sample
+            self.max_input_tokens = max_input_tokens
+            # DSPy-required attributes (some versions inspect these directly)
+            self.model = "hf-local-train"
+            self.model_type = "chat"
+            self.kwargs = {
+                "max_tokens": max_new_tokens,
+                "temperature": temperature,
+            }
+            self.history = []
+
+        def __call__(self, prompt: Optional[str] = None,
+                     messages: Optional[list[dict]] = None,
+                     **kwargs) -> list[str]:
+            import torch
+
+            if messages is not None:
+                try:
+                    text = self.hf_tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True,
+                    )
+                except Exception:
+                    text = "\n".join(
+                        f"{m.get('role', '')}: {m.get('content', '')}"
+                        for m in messages
+                    )
+            else:
+                text = prompt or ""
+
+            n = int(kwargs.get("n", 1) or 1)
+            max_tokens = int(kwargs.get("max_tokens", self.max_new_tokens))
+            temperature = float(kwargs.get("temperature", self.temperature))
+            do_sample = self.do_sample and temperature > 0
+
+            device = next(self.hf_model.parameters()).device
+            prev_padding = self.hf_tokenizer.padding_side
+            self.hf_tokenizer.padding_side = "left"
+            if self.hf_tokenizer.pad_token is None:
+                self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
+
+            was_training = self.hf_model.training
+            try:
+                self.hf_model.eval()
+                with torch.no_grad():
+                    inputs = self.hf_tokenizer(
+                        [text] * n,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                        max_length=self.max_input_tokens,
+                    ).to(device)
+                    gen_kwargs: dict[str, Any] = {
+                        "max_new_tokens": max_tokens,
+                        "do_sample": do_sample,
+                        "pad_token_id": self.hf_tokenizer.eos_token_id,
+                    }
+                    if do_sample:
+                        gen_kwargs.update({
+                            "temperature": temperature,
+                            "top_p": self.top_p,
+                            "top_k": self.top_k,
+                        })
+                    outputs = self.hf_model.generate(**inputs, **gen_kwargs)
+                    gen = outputs[:, inputs["input_ids"].shape[1]:]
+                    texts = self.hf_tokenizer.batch_decode(gen, skip_special_tokens=True)
+            finally:
+                self.hf_tokenizer.padding_side = prev_padding
+                if was_training:
+                    self.hf_model.train()
+
+            self.history.append({
+                "prompt": text,
+                "messages": messages,
+                "response": texts[0] if texts else "",
+                "kwargs": kwargs,
+                "outputs": texts,
+            })
+            return texts
+
+        # DSPy 2.5+ sometimes calls .copy() on the LM during compile; provide one.
+        def copy(self, **kwargs):
+            return self
+
+    return _HFLocalLM
+
+
+def _build_mcq_dspy_module():
+    """Build a fresh DSPy MCQ-solver module. Wrapped in a function so we get
+    a clean copy each propose() call (DSPy mutates module state during compile)."""
+    _require_dspy()
+
+    class _MCQSolver(dspy.Module):
+        def __init__(self):
+            super().__init__()
+            self.solve = dspy.ChainOfThought("question, options -> answer_letter")
+
+        def forward(self, question, options):
+            return self.solve(question=question, options=options)
+
+    return _MCQSolver()
+
+
+def _format_options_for_dspy(options: dict[str, str]) -> str:
+    return "\n".join(f"{k}. {v}" for k, v in options.items())
+
+
+def _rows_to_dspy_examples(rows: list[MCQRow]) -> list[Any]:
+    _require_dspy()
+    out = []
+    for r in rows:
+        ex = dspy.Example(
+            question=r.question,
+            options=_format_options_for_dspy(r.options),
+            answer_letter=r.correct,
+        ).with_inputs("question", "options")
+        out.append(ex)
+    return out
+
+
+def _dspy_correctness_metric(example, pred, trace=None):
+    """1.0 if the predicted letter matches the example's correct letter, else 0.0.
+    Robust to whatever shape the optimizer's intermediate predictions have."""
+    raw = getattr(pred, "answer_letter", None)
+    if raw is None:
+        return 0.0
+    raw = str(raw).strip().upper()
+    m = re.search(r"\b([ABCD])\b", raw)
+    if not m:
+        return 0.0
+    return 1.0 if m.group(1) == example.correct.strip().upper() else 0.0
+
+
+@dataclass
+class DSPyProposerConfig:
+    optimizer: str = "copro"        # "copro" | "mipro"
+    prompt_model: str = "openai/gpt-4o-mini"
+    auto: str = "light"             # MIPROv2 budget tier ("light"|"medium"|"heavy")
+    depth: int = 2                  # COPRO iterations of refinement
+    breadth: int = 3                # COPRO instructions per iteration
+    train_size: int = 24            # examples used for DSPy's internal eval
+    num_threads: int = 1            # DSPy eval parallelism
+    task_max_new_tokens: int = 256  # HF generation length during search
+
+
+class DSPyPromptProposer:
+    """Drop-in replacement for AdaptiveProposer that uses DSPy MIPRO/COPRO.
+
+    Holds references to the live HF model and tokenizer so each .propose()
+    call can run the optimizer with the actual training-time model in the
+    loop. The trainset is a fixed slice of MCQRow objects (use the
+    proposer_view slice — never validate, to keep the gating untainted).
+
+    Same interface as AdaptiveProposer:
+      .include_not_a (attribute)
+      .source_tag (attribute, used by the callback for log labels)
+      .build_payload(*, current_prompt, train_metrics, test_metrics, history)
+      .propose(payload) -> (list[str], list[dict])
+    """
+
+    def __init__(
+        self,
+        *,
+        model,
+        tokenizer,
+        train_rows: list[MCQRow],
+        config: DSPyProposerConfig,
+        include_not_a: bool = False,
+    ) -> None:
+        _require_dspy()
+        if config.optimizer not in ("copro", "mipro"):
+            raise ValueError(f"Unknown DSPy optimizer: {config.optimizer}")
+        self.model = model
+        self.tokenizer = tokenizer
+        self.train_rows = list(train_rows[: config.train_size])
+        self.config = config
+        self.include_not_a = include_not_a
+        self.source_tag = (
+            f"dspy_{config.optimizer}_{'nonblind' if include_not_a else 'blind'}"
+        )
+        # Construct the prompt LM once; it's stateless across calls.
+        self._prompt_lm = dspy.LM(model=config.prompt_model)
+        # Cache the LM-class lazily (so this class can be defined when dspy
+        # is missing — only blows up on first instantiation).
+        self._hf_lm_class = _make_hf_local_lm_class()
+
+    def build_payload(
+        self,
+        *,
+        current_prompt: str,
+        train_metrics: Optional[PromptMetrics],
+        test_metrics: PromptMetrics,
+        history: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        # The DSPy optimizer doesn't directly consume failure samples / metrics
+        # the way the JSON proposer does — its own search loop discovers
+        # failures by evaluating candidates against the trainset. We keep the
+        # payload minimal but pass current_prompt so it can seed the initial
+        # instruction.
+        return {
+            "current_prompt": current_prompt,
+            "history": history,
+            "train_accuracy": train_metrics.accuracy if train_metrics else None,
+            "test_accuracy": test_metrics.accuracy,
+            "test_not_a_accuracy": (
+                test_metrics.not_a_accuracy if self.include_not_a else None
+            ),
+        }
+
+    def propose(
+        self, payload: dict[str, Any],
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        rejection_log: list[dict[str, Any]] = []
+        try:
+            from dspy.teleprompt import COPRO
+            try:
+                from dspy.teleprompt import MIPROv2
+            except ImportError:
+                MIPROv2 = None
+        except ImportError as exc:
+            return [], [{"error": f"could not import dspy.teleprompt: {exc}"}]
+
+        try:
+            hf_lm = self._hf_lm_class(
+                self.model, self.tokenizer,
+                max_new_tokens=self.config.task_max_new_tokens,
+            )
+            dspy.configure(lm=hf_lm)
+
+            module = _build_mcq_dspy_module()
+
+            # Seed the instruction with the current prompt if any
+            seed = (payload.get("current_prompt") or "").strip()
+            if seed:
+                try:
+                    module.solve.signature = (
+                        module.solve.signature.with_instructions(seed)
+                    )
+                except Exception:
+                    # older DSPy may not support with_instructions; skip seeding
+                    pass
+
+            trainset = _rows_to_dspy_examples(self.train_rows)
+            if not trainset:
+                return [], [{"error": "empty trainset"}]
+
+            if self.config.optimizer == "mipro":
+                if MIPROv2 is None:
+                    return [], [{"error": "MIPROv2 not available in this dspy version"}]
+                optimizer = MIPROv2(
+                    metric=_dspy_correctness_metric,
+                    prompt_model=self._prompt_lm,
+                    auto=self.config.auto,
+                    num_threads=self.config.num_threads,
+                )
+                # MIPROv2.compile signature shifted across versions; try the
+                # modern one first, fall back if needed.
+                try:
+                    optimized = optimizer.compile(
+                        module,
+                        trainset=trainset,
+                        max_bootstrapped_demos=0,
+                        max_labeled_demos=0,
+                        requires_permission_to_run=False,
+                    )
+                except TypeError:
+                    optimized = optimizer.compile(
+                        module,
+                        trainset=trainset,
+                        requires_permission_to_run=False,
+                    )
+            else:  # copro
+                optimizer = COPRO(
+                    prompt_model=self._prompt_lm,
+                    metric=_dspy_correctness_metric,
+                    breadth=self.config.breadth,
+                    depth=self.config.depth,
+                )
+                optimized = optimizer.compile(
+                    module,
+                    trainset=trainset,
+                    eval_kwargs={"num_threads": self.config.num_threads},
+                )
+
+            # Extract the best instruction string from the optimized module
+            best_instruction = ""
+            try:
+                sig = optimized.solve.signature
+                best_instruction = (getattr(sig, "instructions", "") or "").strip()
+            except Exception as exc:
+                rejection_log.append({"error": f"could not extract instruction: {exc}"})
+
+            if not best_instruction:
+                rejection_log.append({"error": "optimized instruction is empty"})
+                return [], rejection_log
+
+            # Apply the symmetric forbidden-token filter — same as the vanilla
+            # proposer. If the optimizer happens to produce something that
+            # leaks the failure mode, drop it.
+            ok, violations = check_forbidden(best_instruction)
+            if not ok:
+                rejection_log.append({
+                    "candidate": best_instruction,
+                    "violations": violations,
+                    "reason": "forbidden filter",
+                })
+                return [], rejection_log
+
+            return [best_instruction], rejection_log
+
+        except Exception as exc:
+            logger.exception("DSPy proposer failed: %s", exc)
+            return [], [{"error": str(exc)}]
+
+
+def make_blind_dspy_proposer(
+    *, model, tokenizer, train_rows: list[MCQRow], config: DSPyProposerConfig,
+) -> DSPyPromptProposer:
+    return DSPyPromptProposer(
+        model=model, tokenizer=tokenizer, train_rows=train_rows,
+        config=config, include_not_a=False,
+    )
+
+
+def make_nonblind_dspy_proposer(
+    *, model, tokenizer, train_rows: list[MCQRow], config: DSPyProposerConfig,
+) -> DSPyPromptProposer:
+    return DSPyPromptProposer(
+        model=model, tokenizer=tokenizer, train_rows=train_rows,
+        config=config, include_not_a=True,
+    )
+
+
+# =====================================================================================
 # Reward-coefficient proposer for condition 2c
 # =====================================================================================
 
@@ -2082,9 +2500,10 @@ def make_adaptive_callback(
 
             assert best_cand_prompt is not None and best_cand_metrics is not None
             accept = best_cand_metrics.is_better_than(validate_metrics_current)
-            source = (
+            default_source = (
                 "blind_proposer" if not proposer.include_not_a else "nonblind_proposer"
             )
+            source = getattr(proposer, "source_tag", None) or default_source
             manager.record(
                 iteration=step, stage=stage, source=source,
                 candidate=best_cand_prompt, metrics=best_cand_metrics,
@@ -2829,6 +3248,8 @@ def run_condition_2(
     cache_dir: Optional[str] = None,
     train_file: Optional[str] = None,
     beta: float = GRPO_BETA,
+    use_dspy: bool = False,
+    dspy_config: Optional[DSPyProposerConfig] = None,
 ) -> None:
     """Adaptive conditions from base model. All 3 stages with prompt updates every 10 steps."""
     assert condition in ("2a", "2b")
@@ -2841,10 +3262,30 @@ def run_condition_2(
     model, tokenizer = load_base_model(cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag=condition)
 
-    client = ProposerClient(provider=proposer_provider, model=proposer_model)
-    proposer = (
-        make_blind_proposer(client) if condition == "2a" else make_nonblind_proposer(client)
-    )
+    if use_dspy:
+        cfg = dspy_config or DSPyProposerConfig()
+        # Use the proposer_view slice as DSPy's trainset — never validate, to
+        # keep the gating clean. (validate_rows is reserved for is_better_than.)
+        dspy_trainset = proposer_view_rows
+        proposer = (
+            make_blind_dspy_proposer(
+                model=model, tokenizer=tokenizer,
+                train_rows=dspy_trainset, config=cfg,
+            )
+            if condition == "2a"
+            else make_nonblind_dspy_proposer(
+                model=model, tokenizer=tokenizer,
+                train_rows=dspy_trainset, config=cfg,
+            )
+        )
+        logger.info("Using DSPy %s proposer for condition %s (prompt_model=%s)",
+                    cfg.optimizer, condition, cfg.prompt_model)
+    else:
+        client = ProposerClient(provider=proposer_provider, model=proposer_model)
+        proposer = (
+            make_blind_proposer(client) if condition == "2a"
+            else make_nonblind_proposer(client)
+        )
 
     for stage_name in ("stage0", "stage1", "stage2"):
         cb = make_adaptive_callback(
@@ -2895,6 +3336,8 @@ def run_condition_3(
     cache_dir: Optional[str] = None,
     train_file: Optional[str] = None,
     beta: float = GRPO_BETA,
+    use_dspy: bool = False,
+    dspy_config: Optional[DSPyProposerConfig] = None,
 ) -> None:
     """Adaptive conditions on already-hacked checkpoint. Continued stage-2 GRPO only."""
     assert condition in ("3a", "3b")
@@ -2907,11 +3350,29 @@ def run_condition_3(
     model, tokenizer = load_hacked_checkpoint(hacked_ckpt, cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag=condition)
 
-    client = ProposerClient(provider=proposer_provider, model=proposer_model)
-    # 3a is non-blind, 3b is blind
-    proposer = (
-        make_nonblind_proposer(client) if condition == "3a" else make_blind_proposer(client)
-    )
+    if use_dspy:
+        cfg = dspy_config or DSPyProposerConfig()
+        dspy_trainset = proposer_view_rows
+        # 3a is non-blind, 3b is blind
+        proposer = (
+            make_nonblind_dspy_proposer(
+                model=model, tokenizer=tokenizer,
+                train_rows=dspy_trainset, config=cfg,
+            )
+            if condition == "3a"
+            else make_blind_dspy_proposer(
+                model=model, tokenizer=tokenizer,
+                train_rows=dspy_trainset, config=cfg,
+            )
+        )
+        logger.info("Using DSPy %s proposer for condition %s (prompt_model=%s)",
+                    cfg.optimizer, condition, cfg.prompt_model)
+    else:
+        client = ProposerClient(provider=proposer_provider, model=proposer_model)
+        # 3a is non-blind, 3b is blind
+        proposer = (
+            make_nonblind_proposer(client) if condition == "3a" else make_blind_proposer(client)
+        )
 
     # Pre-training snapshot — what does the hacked model do with empty system prompt?
     pre_metrics = evaluate_prompt(
@@ -3419,6 +3880,77 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "regularize against drift onto a collapsed mode."
         ),
     )
+
+    # DSPy proposer flags. Only consulted when --use-dspy is set; affect
+    # conditions 2a / 2b / 3a / 3b only (not 2c/2d, which optimize rewards).
+    p.add_argument(
+        "--use-dspy",
+        action="store_true",
+        help=(
+            "Use DSPy COPRO/MIPROv2 to propose system prompts instead of the "
+            "vanilla LLM-JSON proposer for conditions 2a/2b/3a/3b. The DSPy "
+            "optimizer wraps the live HF model as a DSPy LM and searches "
+            "instruction space against its own trainset; the candidate winner "
+            "is then re-evaluated by the native validate-set gate before being "
+            "accepted. Requires `pip install dspy-ai>=2.5`."
+        ),
+    )
+    p.add_argument(
+        "--dspy-optimizer",
+        choices=["copro", "mipro"],
+        default="copro",
+        help="Which DSPy optimizer to use when --use-dspy is set.",
+    )
+    p.add_argument(
+        "--dspy-prompt-model",
+        default="openai/gpt-4o-mini",
+        help=(
+            "DSPy prompt-model spec (the LM that proposes new instructions "
+            "during search). Uses LiteLLM under the hood, so any LiteLLM-"
+            "supported model string works (e.g. `openai/gpt-4o-mini`, "
+            "`anthropic/claude-3-5-sonnet-latest`)."
+        ),
+    )
+    p.add_argument(
+        "--dspy-auto",
+        choices=["light", "medium", "heavy"],
+        default="light",
+        help="MIPROv2 search-budget tier. Ignored when --dspy-optimizer=copro.",
+    )
+    p.add_argument(
+        "--dspy-depth",
+        type=int,
+        default=2,
+        help="COPRO depth (iterations of instruction refinement).",
+    )
+    p.add_argument(
+        "--dspy-breadth",
+        type=int,
+        default=3,
+        help="COPRO breadth (candidate instructions per iteration).",
+    )
+    p.add_argument(
+        "--dspy-train-size",
+        type=int,
+        default=24,
+        help=(
+            "Number of examples in DSPy's internal trainset (carved from the "
+            "proposer_view slice). Higher = more reliable signal during "
+            "search but more HF generations per propose() call."
+        ),
+    )
+    p.add_argument(
+        "--dspy-num-threads",
+        type=int,
+        default=1,
+        help="DSPy's internal evaluation parallelism.",
+    )
+    p.add_argument(
+        "--dspy-task-max-new-tokens",
+        type=int,
+        default=256,
+        help="Max new tokens for HF model generation during DSPy's search loop.",
+    )
     return p
 
 
@@ -3438,6 +3970,25 @@ def main() -> None:
     logger.info("=" * 70)
 
     eval_cfg = EvalConfig(seed=args.seed)
+
+    # Build a DSPyProposerConfig if --use-dspy is set; only consumed by 2a/2b/3a/3b.
+    dspy_config: Optional[DSPyProposerConfig] = None
+    if args.use_dspy:
+        dspy_config = DSPyProposerConfig(
+            optimizer=args.dspy_optimizer,
+            prompt_model=args.dspy_prompt_model,
+            auto=args.dspy_auto,
+            depth=args.dspy_depth,
+            breadth=args.dspy_breadth,
+            train_size=args.dspy_train_size,
+            num_threads=args.dspy_num_threads,
+            task_max_new_tokens=args.dspy_task_max_new_tokens,
+        )
+        if args.condition not in ("2a", "2b", "3a", "3b"):
+            logger.warning(
+                "--use-dspy has no effect for condition %s (only 2a/2b/3a/3b "
+                "support DSPy proposer swap).", args.condition,
+            )
 
     t0 = time.perf_counter()
     if args.condition in ("1a", "1b", "1c"):
@@ -3459,6 +4010,8 @@ def main() -> None:
             cache_dir=args.cache_dir,
             train_file=args.train_file,
             beta=args.beta,
+            use_dspy=args.use_dspy,
+            dspy_config=dspy_config,
         )
     elif args.condition in ("2c-blind", "2c-nonblind"):
         run_condition_2c(
@@ -3493,6 +4046,8 @@ def main() -> None:
             cache_dir=args.cache_dir,
             train_file=args.train_file,
             beta=args.beta,
+            use_dspy=args.use_dspy,
+            dspy_config=dspy_config,
         )
 
     elapsed = time.perf_counter() - t0
