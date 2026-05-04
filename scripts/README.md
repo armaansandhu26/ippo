@@ -2,10 +2,6 @@
 
 Run these commands from the project root:
 
-```bash
-cd /Users/arihantbarjatya/open_notebook_llm/ippo/ippo
-```
-
 ## Test-Time Prompt Optimization
 
 Script:
