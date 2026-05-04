@@ -1461,8 +1461,16 @@ def _rows_to_dspy_examples(rows: list[MCQRow]) -> list[Any]:
 
 
 def _dspy_correctness_metric(example, pred, trace=None):
-    """1.0 if the predicted letter matches the example's correct letter, else 0.0.
-    Robust to whatever shape the optimizer's intermediate predictions have."""
+    """1.0 if the predicted letter matches the example's gold letter, else 0.0.
+    Robust to whatever shape the optimizer's intermediate predictions have.
+
+    Note: the gold letter is stored under `answer_letter` because that's what
+    `_rows_to_dspy_examples` writes (matching the signature's output field
+    name). DSPy will silently let you compare against a missing attr — but
+    the comparison will throw AttributeError mid-eval and the parallelizer
+    will swallow the error and report only "Execution cancelled". Don't change
+    this back to `example.correct`.
+    """
     raw = getattr(pred, "answer_letter", None)
     if raw is None:
         return 0.0
@@ -1470,7 +1478,8 @@ def _dspy_correctness_metric(example, pred, trace=None):
     m = re.search(r"\b([ABCD])\b", raw)
     if not m:
         return 0.0
-    return 1.0 if m.group(1) == example.correct.strip().upper() else 0.0
+    gold = str(getattr(example, "answer_letter", "")).strip().upper()
+    return 1.0 if m.group(1) == gold else 0.0
 
 
 @dataclass
@@ -1589,12 +1598,25 @@ class DSPyPromptProposer:
             if self.config.optimizer == "mipro":
                 if MIPROv2 is None:
                     return [], [{"error": "MIPROv2 not available in this dspy version"}]
-                optimizer = MIPROv2(
-                    metric=_dspy_correctness_metric,
-                    prompt_model=self._prompt_lm,
-                    auto=self.config.auto,
-                    num_threads=self.config.num_threads,
-                )
+                # max_errors=1 makes the parallelizer raise the first per-example
+                # exception verbatim instead of accumulating to the threshold and
+                # masking it with "Execution cancelled due to errors or interruption."
+                # Some DSPy versions don't accept this kwarg; fall through if so.
+                try:
+                    optimizer = MIPROv2(
+                        metric=_dspy_correctness_metric,
+                        prompt_model=self._prompt_lm,
+                        auto=self.config.auto,
+                        num_threads=self.config.num_threads,
+                        max_errors=1,
+                    )
+                except TypeError:
+                    optimizer = MIPROv2(
+                        metric=_dspy_correctness_metric,
+                        prompt_model=self._prompt_lm,
+                        auto=self.config.auto,
+                        num_threads=self.config.num_threads,
+                    )
                 # MIPROv2.compile signature shifted across versions; try the
                 # modern one first, fall back if needed.
                 try:
@@ -1612,12 +1634,22 @@ class DSPyPromptProposer:
                         requires_permission_to_run=False,
                     )
             else:  # copro
-                optimizer = COPRO(
-                    prompt_model=self._prompt_lm,
-                    metric=_dspy_correctness_metric,
-                    breadth=self.config.breadth,
-                    depth=self.config.depth,
-                )
+                # Same max_errors=1 rationale as MIPRO above.
+                try:
+                    optimizer = COPRO(
+                        prompt_model=self._prompt_lm,
+                        metric=_dspy_correctness_metric,
+                        breadth=self.config.breadth,
+                        depth=self.config.depth,
+                        max_errors=1,
+                    )
+                except TypeError:
+                    optimizer = COPRO(
+                        prompt_model=self._prompt_lm,
+                        metric=_dspy_correctness_metric,
+                        breadth=self.config.breadth,
+                        depth=self.config.depth,
+                    )
                 optimized = optimizer.compile(
                     module,
                     trainset=trainset,
