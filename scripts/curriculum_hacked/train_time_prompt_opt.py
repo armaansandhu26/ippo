@@ -3126,8 +3126,15 @@ def setup_logging(log_file: Optional[Path] = None, level: str = "INFO") -> None:
     )
 
 
-def load_base_model(model_name: str = DEFAULT_BASE_MODEL, lora_rank: int = 16, cache_dir: Optional[str] = None):
-    """Match the curriculum file's loader exactly."""
+def load_base_model(model_name: Optional[str] = None, lora_rank: int = 16, cache_dir: Optional[str] = None):
+    """Match the curriculum file's loader exactly.
+
+    model_name defaults to DEFAULT_BASE_MODEL when None — looked up at call
+    time, so main() can override the module-level constant from a CLI flag
+    before any condition runner fires.
+    """
+    if model_name is None:
+        model_name = DEFAULT_BASE_MODEL
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_name,
         max_seq_length=1024,
@@ -3188,6 +3195,60 @@ def write_final_eval(
         "FINAL EVAL [%s]: acc=%.4f not_a_acc=%.4f a_rate=%.4f (n=%d)",
         condition, final_metrics.accuracy, final_metrics.not_a_accuracy,
         final_metrics.a_rate, final_metrics.n,
+    )
+
+
+def run_condition_0(
+    *,
+    output_root: Path,
+    eval_cfg: EvalConfig,
+    cache_dir: Optional[str] = None,
+    train_file: Optional[str] = None,
+    beta: float = GRPO_BETA,
+) -> None:
+    """Condition 0: the bare hack. Three-stage curriculum GRPO with NO
+    interventions — no prompt augmentation, no reward shaping, no proposer
+    calls, no validate-set gates during training. Empty system prompt for all
+    three stages.
+
+    This is the reference run that produces the hacked policy the other
+    conditions are trying to fix. Useful as a clean control.
+    """
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    train_rows = load_mcq_jsonl(train_file or TRAIN_DATA_URL)
+    test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
+    _, validate_rows, final_eval_rows = split_test_set(test_rows)
+
+    model, tokenizer = load_base_model(cache_dir=cache_dir)
+    manager = SystemPromptManager(initial_prompt="", condition_tag="0")
+
+    for stage_name in ("stage0", "stage1", "stage2"):
+        run_stage(
+            spec=STAGE_SPECS[stage_name],
+            model=model,
+            tokenizer=tokenizer,
+            train_rows=train_rows,
+            manager=manager,
+            callbacks=[],
+            output_root=output_root,
+            beta=beta,
+        )
+        post_stage_metrics = evaluate_prompt(
+            model, tokenizer, validate_rows, manager.current_prompt,
+            stage=stage_name, cfg=eval_cfg,
+        )
+        (output_root / f"post_{stage_name}_validate.json").write_text(json.dumps({
+            "stage": stage_name,
+            "system_prompt": manager.current_prompt,
+            "validate_metrics": post_stage_metrics.to_dict(include_samples=False),
+        }, indent=2))
+
+    manager.dump(output_root / "manager_final.json")
+    write_final_eval(
+        model=model, tokenizer=tokenizer,
+        final_eval_rows=final_eval_rows, manager=manager,
+        eval_cfg=eval_cfg, output_root=output_root, condition="0",
     )
 
 
@@ -3877,7 +3938,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Train-time prompt optimization on a maximally-A-biased GRPO curriculum."
     )
     p.add_argument("--condition", required=True,
-                   choices=["1a", "1b", "1c", "2a", "2b", "2c-blind", "2c-nonblind",
+                   choices=["0", "1a", "1b", "1c", "2a", "2b", "2c-blind", "2c-nonblind",
                             "2d-blind", "2d-nonblind", "2d-oracle",
                             "3a", "3b"])
     p.add_argument("--output-root", default=None,
@@ -3893,6 +3954,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--cache-dir",
         default=None,
         help="Custom HuggingFace cache directory",
+    )
+    p.add_argument(
+        "--base-model",
+        default=None,
+        help=(
+            "Override the base model for conditions that train from scratch "
+            "(everything except 3a/3b, which resume from --hacked-ckpt). "
+            "Any FastLanguageModel-loadable Qwen variant works, e.g. "
+            "`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen2.5-3B-Instruct`, "
+            "`Qwen/Qwen2.5-7B-Instruct`. Defaults to "
+            f"`{DEFAULT_BASE_MODEL}`."
+        ),
     )
     p.add_argument(
         "--train-file",
@@ -3990,6 +4063,15 @@ def main() -> None:
     load_dotenv()
     args = build_arg_parser().parse_args()
 
+    # Override the module-level default model name from CLI if provided. We
+    # reassign the global rather than threading --base-model through every
+    # condition runner; load_base_model() reads DEFAULT_BASE_MODEL lazily so
+    # this takes effect for all subsequent calls. Has no effect on conditions
+    # 3a/3b, which load weights from --hacked-ckpt.
+    if args.base_model is not None:
+        global DEFAULT_BASE_MODEL
+        DEFAULT_BASE_MODEL = args.base_model
+
     output_root = Path(
         args.output_root or f"outputs/train_time_prompt_opt/{args.condition}"
     )
@@ -4023,7 +4105,15 @@ def main() -> None:
             )
 
     t0 = time.perf_counter()
-    if args.condition in ("1a", "1b", "1c"):
+    if args.condition == "0":
+        run_condition_0(
+            output_root=output_root,
+            eval_cfg=eval_cfg,
+            cache_dir=args.cache_dir,
+            train_file=args.train_file,
+            beta=args.beta,
+        )
+    elif args.condition in ("1a", "1b", "1c"):
         run_condition_1(
             condition=args.condition,
             output_root=output_root,
