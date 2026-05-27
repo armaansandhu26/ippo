@@ -2977,7 +2977,12 @@ def setup_logging(log_file: Optional[Path] = None, level: str = "INFO") -> None:
 
 
 def load_base_model(model_name: str = DEFAULT_BASE_MODEL, lora_rank: int = 16, cache_dir: Optional[str] = None):
-    """Match the curriculum file's loader exactly."""
+    """Match the curriculum file's loader exactly.
+
+    The default is a Qwen checkpoint, but both Qwen and Llama-family
+    Unsloth-loadable instruct models using the standard attention/MLP
+    projection names should work here.
+    """
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_name,
         max_seq_length=1024,
@@ -3832,6 +3837,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Custom HuggingFace cache directory",
     )
     p.add_argument(
+        "--base-model",
+        default=None,
+        help=(
+            "Override the base model for conditions that train from scratch "
+            "(everything except 3a/3b and 3compare, which resume from "
+            "--hacked-ckpt). Examples include "
+            "`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen2.5-3B-Instruct`, "
+            "`unsloth/Llama-3.2-1B-Instruct-bnb-4bit`, "
+            "`unsloth/Llama-3.2-3B-Instruct-bnb-4bit`, or "
+            "`unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit`. Defaults to "
+            f"`{DEFAULT_BASE_MODEL}`."
+        ),
+    )
+    p.add_argument(
         "--train-file",
         default=None,
         help=(
@@ -3883,6 +3902,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     load_dotenv()
     args = build_arg_parser().parse_args()
+
+    global DEFAULT_BASE_MODEL
+    if args.base_model:
+        DEFAULT_BASE_MODEL = args.base_model
 
     output_root = Path(
         args.output_root or f"outputs/train_time_prompt_opt/{args.condition}"

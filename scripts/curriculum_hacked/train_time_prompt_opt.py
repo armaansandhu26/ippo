@@ -3961,9 +3961,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Override the base model for conditions that train from scratch "
             "(everything except 3a/3b, which resume from --hacked-ckpt). "
-            "Any FastLanguageModel-loadable Qwen variant works, e.g. "
+            "Any FastLanguageModel-loadable instruct model should work, e.g. "
             "`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen2.5-3B-Instruct`, "
-            "`Qwen/Qwen2.5-7B-Instruct`. Defaults to "
+            "`unsloth/Llama-3.2-1B-Instruct-bnb-4bit`, "
+            "`unsloth/Llama-3.2-3B-Instruct-bnb-4bit`, or "
+            "`unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit`. Defaults to "
             f"`{DEFAULT_BASE_MODEL}`."
         ),
     )
