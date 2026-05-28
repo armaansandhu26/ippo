@@ -47,6 +47,13 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def console_banner(message: str) -> None:
+    """Emit a high-visibility progress line for notebook stdout and logs."""
+    line = f"\n{'=' * 18} {message} {'=' * 18}"
+    print(line, flush=True)
+    logger.info(message)
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -3101,12 +3108,16 @@ def run_stage(
     for cb in callbacks:
         trainer.add_callback(cb)
 
+    console_banner(
+        f"Starting {spec.name} | steps={spec.max_steps} | completion={spec.max_completion_length} "
+        f"| beta={beta:.3f} | rewards={len(rewards)} | train_examples={len(train_rows)}"
+    )
     logger.info(
-        "Starting %s GRPO: max_steps=%d, completion=%d, beta=%.3f, n_rewards=%d, system_aug=%s",
-        spec.name, spec.max_steps, spec.max_completion_length, beta, len(rewards),
-        manager.current_prompt[:80] or "<empty>",
+        "System augmentation for %s: %s",
+        spec.name, manager.current_prompt[:200] or "<empty>",
     )
     trainer.train()
+    console_banner(f"Finished {spec.name}")
 
 
 # =====================================================================================
@@ -3170,31 +3181,70 @@ def load_hacked_checkpoint(ckpt_path: str, cache_dir: Optional[str] = None):
     return model, tokenizer
 
 
-def write_final_eval(
+def write_named_eval(
     *,
     model,
     tokenizer,
+    eval_rows: list[MCQRow],
+    manager: SystemPromptManager,
+    eval_cfg: EvalConfig,
+    output_root: Path,
+    condition: str,
+    output_name: str,
+    split_label: str,
+) -> None:
+    """Run a stage2-format eval for a named split and persist the metrics."""
+    metrics = evaluate_prompt(
+        model, tokenizer, eval_rows, manager.current_prompt,
+        stage="stage2", cfg=eval_cfg,
+    )
+    summary = {
+        "condition": condition,
+        "split": split_label,
+        "final_system_prompt": manager.current_prompt,
+        "final_eval_metrics": metrics.to_dict(include_samples=True),
+    }
+    (output_root / output_name).write_text(json.dumps(summary, indent=2))
+    logger.info(
+        "%s EVAL [%s]: acc=%.4f not_a_acc=%.4f a_rate=%.4f (n=%d)",
+        split_label.upper(), condition, metrics.accuracy, metrics.not_a_accuracy,
+        metrics.a_rate, metrics.n,
+    )
+
+
+def write_final_evals(
+    *,
+    model,
+    tokenizer,
+    train_rows: list[MCQRow],
     final_eval_rows: list[MCQRow],
     manager: SystemPromptManager,
     eval_cfg: EvalConfig,
     output_root: Path,
     condition: str,
 ) -> None:
-    """Run a final eval at stage2-format on the held-back final_eval slice."""
-    final_metrics = evaluate_prompt(
-        model, tokenizer, final_eval_rows, manager.current_prompt,
-        stage="stage2", cfg=eval_cfg,
+    """Persist both train-split and test-split final evaluations."""
+    write_named_eval(
+        model=model,
+        tokenizer=tokenizer,
+        eval_rows=train_rows,
+        manager=manager,
+        eval_cfg=eval_cfg,
+        output_root=output_root,
+        condition=condition,
+        output_name="final_train_eval.json",
+        split_label="train",
     )
-    summary = {
-        "condition": condition,
-        "final_system_prompt": manager.current_prompt,
-        "final_eval_metrics": final_metrics.to_dict(include_samples=True),
-    }
-    (output_root / "final_eval.json").write_text(json.dumps(summary, indent=2))
-    logger.info(
-        "FINAL EVAL [%s]: acc=%.4f not_a_acc=%.4f a_rate=%.4f (n=%d)",
-        condition, final_metrics.accuracy, final_metrics.not_a_accuracy,
-        final_metrics.a_rate, final_metrics.n,
+    write_named_eval(
+        model=model,
+        tokenizer=tokenizer,
+        eval_rows=final_eval_rows,
+        manager=manager,
+        eval_cfg=eval_cfg,
+        output_root=output_root,
+        condition=condition,
+        output_name="final_eval.json",
+        split_label="test",
     )
 
 
@@ -3219,6 +3269,10 @@ def run_condition_0(
     train_rows = load_mcq_jsonl(train_file or TRAIN_DATA_URL)
     test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
     _, validate_rows, final_eval_rows = split_test_set(test_rows)
+    console_banner(
+        f"Condition 0 setup | train_rows={len(train_rows)} | validate_rows={len(validate_rows)} "
+        f"| final_eval_rows={len(final_eval_rows)}"
+    )
 
     model, tokenizer = load_base_model(cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag="0")
@@ -3243,10 +3297,17 @@ def run_condition_0(
             "system_prompt": manager.current_prompt,
             "validate_metrics": post_stage_metrics.to_dict(include_samples=False),
         }, indent=2))
+        print(
+            f"[validate] {stage_name}: acc={post_stage_metrics.accuracy:.4f} "
+            f"not_a_acc={post_stage_metrics.not_a_accuracy:.4f} "
+            f"a_rate={post_stage_metrics.a_rate:.4f}",
+            flush=True,
+        )
 
     manager.dump(output_root / "manager_final.json")
-    write_final_eval(
+    write_final_evals(
         model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
         final_eval_rows=final_eval_rows, manager=manager,
         eval_cfg=eval_cfg, output_root=output_root, condition="0",
     )
@@ -3324,8 +3385,9 @@ def run_condition_1(
         }, indent=2))
 
     manager.dump(output_root / "manager_final.json")
-    write_final_eval(
+    write_final_evals(
         model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
         final_eval_rows=final_eval_rows, manager=manager,
         eval_cfg=eval_cfg, output_root=output_root, condition=condition,
     )
@@ -3411,8 +3473,9 @@ def run_condition_2(
         }, indent=2))
 
     manager.dump(output_root / "manager_final.json")
-    write_final_eval(
+    write_final_evals(
         model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
         final_eval_rows=final_eval_rows, manager=manager,
         eval_cfg=eval_cfg, output_root=output_root, condition=condition,
     )
@@ -3509,8 +3572,9 @@ def run_condition_3(
     )
 
     manager.dump(output_root / "manager_final.json")
-    write_final_eval(
+    write_final_evals(
         model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
         final_eval_rows=final_eval_rows, manager=manager,
         eval_cfg=eval_cfg, output_root=output_root, condition=condition,
     )
@@ -3698,8 +3762,9 @@ def run_condition_2c(
         }, indent=2))
 
     coeffs_manager.dump(output_root / "coeffs_final.json")
-    write_final_eval(
+    write_final_evals(
         model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
         final_eval_rows=final_eval_rows, manager=prompt_manager,
         eval_cfg=eval_cfg, output_root=output_root, condition=condition,
     )
@@ -3922,8 +3987,9 @@ def run_condition_2d(
 
     prompt_manager.dump(output_root / "manager_final.json")
     coeffs_manager.dump(output_root / "coeffs_final.json")
-    write_final_eval(
+    write_final_evals(
         model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
         final_eval_rows=final_eval_rows, manager=prompt_manager,
         eval_cfg=eval_cfg, output_root=output_root, condition=condition,
     )
@@ -4084,6 +4150,11 @@ def main() -> None:
     logger.info("Condition: %s", args.condition)
     logger.info("Output root: %s", output_root)
     logger.info("=" * 70)
+    console_banner(
+        f"Run start | condition={args.condition} | base_model={DEFAULT_BASE_MODEL} "
+        f"| train_file={args.train_file or TRAIN_DATA_URL} | seed={args.seed} "
+        f"| output_root={output_root}"
+    )
 
     eval_cfg = EvalConfig(seed=args.seed)
 
