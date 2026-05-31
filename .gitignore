@@ -23,3 +23,19 @@ process-scripts/
 logs/
 unsloth_compiled_cache/
 report/
+
+# macOS metadata
+.DS_Store
+
+# benchmark + run artifacts (generated/bulky)
+*.zip
+qwen2.5_family_runs/**/run.log
+qwen2.5_family_runs/**/manager_final.json
+qwen2.5_family_runs/**/final_eval.json
+qwen2.5_family_runs/**/post_stage*.json
+qwen2.5_family_runs/**/outputs_stage*/
+
+# judge intermediates and logs
+benchmark_metrics/judge/*.log
+benchmark_metrics/judge/*.jsonl
+benchmark_metrics/judge/*.bak

@@ -1,0 +1,15 @@
+{
+  "description": "Excluded from judge-prep and judge-align eval (judge solution did not pass GT verification).",
+  "count": 7,
+  "verified_count": 224,
+  "total_count": 231,
+  "question_ids": [
+    "gsm8k_test_000089",
+    "gsm8k_test_000119",
+    "gsm8k_test_000187",
+    "gsm8k_test_000255",
+    "gsm8k_test_000649",
+    "gsm8k_test_000931",
+    "gsm8k_test_000952"
+  ]
+}
