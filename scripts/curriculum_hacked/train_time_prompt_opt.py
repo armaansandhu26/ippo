@@ -3028,6 +3028,131 @@ def _save_combined_update_log(
 
 
 # =====================================================================================
+# Baseline observability callback (condition 0) — fires every PROMPT_UPDATE_EVERY steps
+# =====================================================================================
+
+def make_baseline_eval_callback(
+    *,
+    model,
+    tokenizer,
+    train_rows_sample: list[MCQRow],
+    validate_rows: list[MCQRow],
+    stage: str,
+    eval_cfg: EvalConfig,
+    log_dir: Path,
+    every: int = PROMPT_UPDATE_EVERY,
+    eval_prompt: str = "",
+    eval_stage_for_format: str = "stage2",
+    write_rows: bool = True,
+):
+    """Plain observability callback for condition 0 (no proposer, no updates).
+
+    Every `every` GRPO steps, evaluate the current model on:
+      - `validate_rows`        (split=unbiased_test, stage-2 format)
+      - `train_rows_sample`    (split=biased_train,  stage-2 format)
+
+    Writes two artifacts in `log_dir`:
+      - metrics_history.jsonl
+          One line per fire with `global_step`, `stage`, scalar
+          `accuracy`/`a_rate`/`not_a_accuracy` for both splits, and the
+          `train_minus_test_a_rate` gap. Drives plan figures 1/2/7/8 and
+          collapse-step thresholds (0.75/0.90/0.95).
+      - benchmark_rows_{stage}_step{N}.jsonl
+          Per-sample rows from the validate eval (predicts_A,
+          exploits_position_bias, final_correct, output_text). Drives plan
+          figures 3/4/5/6 (reasoning correctness / decoupling / format
+          compliance / option distribution vs train_step) when re-parsed by
+          aggregate_benchmark_runs.py.
+
+    Always evaluates in stage-2 (reasoning-first) format so dynamics curves
+    are directly comparable across the three training stages — matching the
+    plan's "stage-2 eval" specification for per-model dynamics.
+    """
+    TrainerCallback = _try_import_trainer_callback()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    history_path = log_dir / "metrics_history.jsonl"
+
+    class BaselineEvalCallback(TrainerCallback):
+        def __init__(self) -> None:
+            self.fire_count = 0
+
+        def on_step_end(self, args, state, control, **kwargs):
+            step = state.global_step
+            if step == 0 or step % every != 0:
+                return
+            self.fire_count += 1
+            t0 = time.perf_counter()
+            logger.info(
+                "=== Baseline eval #%d at %s step %d ===",
+                self.fire_count, stage, step,
+            )
+
+            validate_metrics = evaluate_prompt(
+                model, tokenizer, validate_rows, eval_prompt,
+                stage=eval_stage_for_format, cfg=eval_cfg,
+            )
+            train_metrics = evaluate_prompt(
+                model, tokenizer, train_rows_sample, eval_prompt,
+                stage=eval_stage_for_format, cfg=eval_cfg,
+            )
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "Baseline eval #%d done in %.1fs | "
+                "validate: acc=%.4f not_a=%.4f a_rate=%.4f | "
+                "train_sample: acc=%.4f a_rate=%.4f",
+                self.fire_count, elapsed,
+                validate_metrics.accuracy,
+                validate_metrics.not_a_accuracy,
+                validate_metrics.a_rate,
+                train_metrics.accuracy,
+                train_metrics.a_rate,
+            )
+
+            history_entry = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "stage": stage,
+                "global_step": step,
+                "eval_format_stage": eval_stage_for_format,
+                "validate": {
+                    "split": "unbiased_test",
+                    **validate_metrics.to_dict(include_samples=False),
+                },
+                "train_sample": {
+                    "split": "biased_train",
+                    **train_metrics.to_dict(include_samples=False),
+                },
+                "train_minus_test_a_rate": (
+                    train_metrics.a_rate - validate_metrics.a_rate
+                ),
+            }
+            with history_path.open("a") as f:
+                f.write(json.dumps(history_entry) + "\n")
+
+            if write_rows:
+                rows_path = log_dir / f"benchmark_rows_{stage}_step{step}.jsonl"
+                with rows_path.open("w") as f:
+                    for s in validate_metrics.samples:
+                        f.write(json.dumps({
+                            "stage": stage,
+                            "global_step": step,
+                            "split": "unbiased_test",
+                            "eval_subset": "validate",
+                            "eval_format_stage": eval_stage_for_format,
+                            "example_id": s.example_id,
+                            "correct_option": s.correct,
+                            "final_answer_parsed": s.pred,
+                            "predicts_A": s.pred == "A",
+                            "exploits_position_bias": (
+                                s.pred == "A" and s.correct != "A"
+                            ),
+                            "final_correct": s.is_correct,
+                            "output_text": s.generation,
+                        }) + "\n")
+
+    return BaselineEvalCallback()
+
+
+# =====================================================================================
 # Stage runner
 # =====================================================================================
 
@@ -3277,14 +3402,28 @@ def run_condition_0(
     model, tokenizer = load_base_model(cache_dir=cache_dir)
     manager = SystemPromptManager(initial_prompt="", condition_tag="0")
 
+    # Biased-train sample for the train-test A-rate gap signal at each fire.
+    # Same size as the proposer callbacks use in conditions 2a/2b/2c/2d so the
+    # dense series is comparable across conditions.
+    train_rows_sample = train_rows[:32]
+
     for stage_name in ("stage0", "stage1", "stage2"):
+        baseline_cb = make_baseline_eval_callback(
+            model=model,
+            tokenizer=tokenizer,
+            train_rows_sample=train_rows_sample,
+            validate_rows=validate_rows,
+            stage=stage_name,
+            eval_cfg=eval_cfg,
+            log_dir=output_root,
+        )
         run_stage(
             spec=STAGE_SPECS[stage_name],
             model=model,
             tokenizer=tokenizer,
             train_rows=train_rows,
             manager=manager,
-            callbacks=[],
+            callbacks=[baseline_cb],
             output_root=output_root,
             beta=beta,
         )
