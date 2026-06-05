@@ -76,7 +76,7 @@ Also run **unbiased-curriculum controls** (same stages, unbiased train) as the p
 
 ### Metrics capture status
 
-**Reference implementation:** `scripts/aggregate_benchmark_runs.py` → `benchmark_metrics/families/<runs-root>/` (Qwen: `qwen2.5_family_runs`, 30 runs × 135 final-eval rows). Optional judge: `scripts/benchmark_llm_judge.py` → `benchmark_metrics/judge/`.
+**Reference implementation:** `scripts/aggregate_benchmark_runs.py` → `benchmark_metrics/families/<runs-root>/` (current exports: `qwen_2.5_family_runs_v1_only`, `llama_3.x_family_runs_v1_only`). Family-comparison plots live under `benchmark_metrics/combined/cross_family_figures/`. Optional judge: `scripts/benchmark_llm_judge.py` → shared cache in `benchmark_metrics/judge/`.
 
 **Legend:** ✅ captured in exports · 🟡 partial / coarse only · 🔜 planned (in-flight logging) · ⬜ not planned for v1
 
@@ -110,9 +110,9 @@ Also run **unbiased-curriculum controls** (same stages, unbiased train) as the p
 
 | Metric                             | Definition                                    | Status | Where                                                                                       |
 | ---------------------------------- | --------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
-| A-rate vs global step              | for collapse curves                           | 🔜     | `metrics_history.jsonl` (`global_step`, `a_rate`, `accuracy`)                               |
-| Collapse step @ 0.75 / 0.90 / 0.95 | first step with A-rate ≥ threshold            | 🔜     | derived from `metrics_history.jsonl`                                                        |
-| Accuracy vs step (collapse era)    | same eval cadence                             | 🔜     | same file                                                                                   |
+| A-rate vs global step              | for collapse curves                           | ✅     | `metrics_history.jsonl` (`global_step`, `a_rate`, `accuracy`)                               |
+| Collapse step @ 0.75 / 0.90 / 0.95 | first step with A-rate ≥ threshold            | ✅     | derived from `metrics_history.jsonl`; see `figures/09_...` / `10_...`                       |
+| Accuracy vs step (collapse era)    | same eval cadence                             | 🟡     | available in `metrics_history.jsonl`; plot tested but currently not kept in figure set      |
 | Shortcut rate vs step              | optional; derivable if preds logged each step | 🔜     | scalar in history or post-process                                                           |
 | Coarse stage snapshots             | acc / A-rate at end of stage0/1/2             | 🟡     | `post_stage*_validate.json` in run dirs (n=64, stage-native prompt; **not** stage-2 format) |
 
@@ -130,8 +130,8 @@ Also run **unbiased-curriculum controls** (same stages, unbiased train) as the p
 | ------------------------------------------ | ------ | ---------------------------------------------------------------------------- |
 | `split=unbiased_test` row-level logs       | ✅     | all `benchmark_rows.csv` today                                               |
 | `split=biased_train` eval                  | ⬜     | `final_train_eval.json` supported in trainer, not stored in Qwen family runs |
-| Train–test A-rate gap                      | ⬜     | needs biased-train eval on same checkpoint                                   |
-| `train_step` = optimizer step dense series | 🔜     | via `metrics_history.jsonl`                                                  |
+| Train–test A-rate gap                      | ✅     | dense training-time proxy via `train_sample.a_rate - validate.a_rate` in `metrics_history.jsonl` |
+| `train_step` = optimizer step dense series | ✅     | via `metrics_history.jsonl`                                                  |
 | Row-level logs at stage0/1/2               | ⬜     | only scalar validate summaries                                               |
 | `proxy_reward` at eval                     | ⬜     | P1; training-only today                                                      |
 | `recovery` split during recovery training  | 🔜     | with recovery experiment                                                     |
@@ -140,28 +140,31 @@ Also run **unbiased-curriculum controls** (same stages, unbiased train) as the p
 
 | #   | Figure                                            | Status                                          |
 | --- | ------------------------------------------------- | ----------------------------------------------- |
-| 1   | A-rate vs train_step                              | 🟡 acc/A on 4 validate points; 🔜 dense history |
-| 2   | Unbiased accuracy vs train_step                   | 🟡 validate + 🔜 history                        |
+| 1   | A-rate vs train_step                              | ⬜ dense plot generated once, then dropped from current figure set |
+| 2   | Unbiased accuracy vs train_step                   | 🟡 coarse stage plot only                        |
 | 3   | Reasoning correctness vs train_step               | ⬜                                              |
-| 4   | Decoupling vs train_step                          | ⬜                                              |
+| 4   | Decoupling vs train_step                          | 🟡 coarse stage/final view only (`figures/03b_...`) |
 | 5   | Format compliance vs train_step                   | ⬜ (final only today)                           |
 | 6   | Option distribution over time                     | 🟡 final only (`figures/05_…`)                  |
 | 7   | Not-A accuracy vs train_step                      | 🟡 validate scalars only                        |
-| 8   | Train–test A-rate gap vs train_step               | ⬜                                              |
+| 8   | Train–test A-rate gap vs train_step               | ✅ dense history plot (`figures/08_…`)          |
 | —   | Final metrics by model × curriculum               | ✅ `figures/01_…`                               |
 | —   | Hacking gap (biased − unbiased curriculum A-rate) | ✅ `figures/06_…`                               |
 | —   | Numeric vs judge decoupling                       | ✅ `figures/04_…`                               |
+| —   | Collapse thresholds (first crossing)              | ✅ `figures/09_…`                               |
+| —   | Collapse thresholds (sustained, 2 evals)          | ✅ `figures/10_…`                               |
+| —   | Cross-family final metrics / hacking gap / collapse | ✅ `benchmark_metrics/combined/cross_family_figures/` |
 
 #### Cross-family / reproducibility (out of metric column scope)
 
 | Item                              | Status                                      |
 | --------------------------------- | ------------------------------------------- |
-| Second model family (Llama, etc.) | 🔜 same metric contract per run             |
-| `benchmark_metrics/combined/`     | ✅ script exists; populate when 2+ families |
-| Seeds ≥3 per (model, curriculum)  | ✅ Qwen family                              |
+| Second model family (Llama, etc.) | ✅ Llama family exported under same metric contract |
+| `benchmark_metrics/combined/`     | ✅ populated, including cross-family comparison figures |
+| Seeds ≥3 per (model, curriculum)  | ✅ Qwen family; ✅ Llama family with one missing final eval for `unbiased llama3.2-3b seed123` |
 | Released aggregates + judge cache | ✅                                          |
 
-**v1 per-model metric set is complete at final eval** once judge merge is run. **Collapse + recovery over time** complete the plan’s dynamics/recovery columns after `metrics_history.jsonl` / `recovery_history.jsonl` land (same schema for every future family).
+**v1 per-model metric set is complete at final eval** for both Qwen and Llama once judge merge is run. **Collapse over time** is now available from `metrics_history.jsonl` for both families; **recovery** remains the main missing dynamics column.
 
 ---
 
@@ -284,6 +287,8 @@ Pick one primary definition for the paper and ablate if needed:
 1. **prep** — judge solves each question → `judge_solutions.jsonl`; row includes `judge_verified` (numeric + letter match vs dataset GT). Only verified rows are used for align.
 2. **align** — judge compares model `<reasoning>` to cached solution, prompt anchored to GT; skipped if `judge_verified` is false → `judge_alignments.jsonl`
 
+Current behavior: resume mode now retries rows with non-empty `judge_align_error` instead of treating them as cached-complete.
+
 Re-verify cached solutions without API: `python scripts/benchmark_llm_judge.py verify --cache-dir ... --replace`
 
 All exports live under `benchmark_metrics/` (see `benchmark_metrics/README.md`):
@@ -342,12 +347,13 @@ Adds CSV columns: `judge_aligns`, `reasoning_correct_judge`, `is_decoupled_judge
 ## Open questions (track in issues / meetings)
 
 - [ ] Finalize `reasoning_correct` definition (Option A vs B vs judge Option C) for paper primary column
-- [x] Row-level + aggregate final metrics via `aggregate_benchmark_runs.py` (Qwen family done)
-- [x] LLM judge prep/align + `benchmark_metrics/judge/` cache
-- [ ] Wire `metrics_history.jsonl` + derive collapse steps (training callback)
+- [x] Row-level + aggregate final metrics via `aggregate_benchmark_runs.py` (Qwen + Llama exports done)
+- [x] LLM judge prep/align + `benchmark_metrics/judge/` cache (Qwen + Llama)
+- [x] Derive collapse steps from `metrics_history.jsonl` for current Qwen/Llama runs
 - [ ] Recovery phase + `recovery_history.jsonl` + `final_eval_after_recovery.json`
 - [ ] Judge: report align rate alongside decoupling; document 7 excluded question IDs
 - [ ] Log `proxy_reward` at eval time vs only during training (P1)
 - [x] Use `predicts_A` (factual) vs shortcut metrics only on unbiased split — see naming rationale above
-- [ ] Train–test A-gap: optional `final_train_eval.json` on biased runs
+- [x] Train–test A-gap proxy from dense history (`train_sample.a_rate - validate.a_rate`)
+- [ ] Optional `final_train_eval.json` on biased runs for final train/test A-gap
 - [ ] Recovery protocol: fine-tune on unbiased vs eval-only (intervention arms out of v1 benchmark)

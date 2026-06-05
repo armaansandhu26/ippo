@@ -29,13 +29,9 @@ report/
 
 # benchmark + run artifacts (generated/bulky)
 *.zip
-qwen2.5_family_runs/**/run.log
-qwen2.5_family_runs/**/manager_final.json
-qwen2.5_family_runs/**/final_eval.json
-qwen2.5_family_runs/**/post_stage*.json
-qwen2.5_family_runs/**/outputs_stage*/
-
-# judge intermediates and logs
-benchmark_metrics/judge/*.log
-benchmark_metrics/judge/*.jsonl
-benchmark_metrics/judge/*.bak
+/qwen2.5_family_runs/
+/qwen_2.5_family_and_llama_3.x_family_runs_v1/
+/qwen_2.5_family_runs_v1_only/
+/llama_3.x_family_runs_v1_only/
+*_family_runs*/**/run.log
+*_family_logs*/

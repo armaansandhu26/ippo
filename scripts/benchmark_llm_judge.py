@@ -330,6 +330,11 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         f.flush()
 
 
+def should_retry_alignment(existing_row: dict[str, Any]) -> bool:
+    """Retry prior alignment rows that ended with an API/runtime error."""
+    return bool((existing_row.get("judge_align_error") or "").strip())
+
+
 def make_openai_client(cfg: JudgeConfig):
     from openai import OpenAI
 
@@ -668,7 +673,7 @@ def run_align(
         qid = row.get("question_id", "")
         run_dir = row.get("run_dir", "")
         aid = alignment_key(qid, run_dir)
-        if aid in existing:
+        if aid in existing and not should_retry_alignment(existing[aid]):
             continue
         if not solutions.get(qid):
             continue
