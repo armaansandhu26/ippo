@@ -3044,6 +3044,10 @@ def make_baseline_eval_callback(
     eval_prompt: str = "",
     eval_stage_for_format: str = "stage2",
     write_rows: bool = True,
+    history_filename: str = "metrics_history.jsonl",
+    rows_prefix: str = "benchmark_rows",
+    validate_split_label: str = "unbiased_test",
+    train_split_label: str = "biased_train",
 ):
     """Plain observability callback for condition 0 (no proposer, no updates).
 
@@ -3070,7 +3074,7 @@ def make_baseline_eval_callback(
     """
     TrainerCallback = _try_import_trainer_callback()
     log_dir.mkdir(parents=True, exist_ok=True)
-    history_path = log_dir / "metrics_history.jsonl"
+    history_path = log_dir / history_filename
 
     class BaselineEvalCallback(TrainerCallback):
         def __init__(self) -> None:
@@ -3114,11 +3118,11 @@ def make_baseline_eval_callback(
                 "global_step": step,
                 "eval_format_stage": eval_stage_for_format,
                 "validate": {
-                    "split": "unbiased_test",
+                    "split": validate_split_label,
                     **validate_metrics.to_dict(include_samples=False),
                 },
                 "train_sample": {
-                    "split": "biased_train",
+                    "split": train_split_label,
                     **train_metrics.to_dict(include_samples=False),
                 },
                 "train_minus_test_a_rate": (
@@ -3129,13 +3133,13 @@ def make_baseline_eval_callback(
                 f.write(json.dumps(history_entry) + "\n")
 
             if write_rows:
-                rows_path = log_dir / f"benchmark_rows_{stage}_step{step}.jsonl"
+                rows_path = log_dir / f"{rows_prefix}_{stage}_step{step}.jsonl"
                 with rows_path.open("w") as f:
                     for s in validate_metrics.samples:
                         f.write(json.dumps({
                             "stage": stage,
                             "global_step": step,
-                            "split": "unbiased_test",
+                            "split": validate_split_label,
                             "eval_subset": "validate",
                             "eval_format_stage": eval_stage_for_format,
                             "example_id": s.example_id,
@@ -3719,6 +3723,110 @@ def run_condition_3(
     )
 
 
+def run_condition_recovery(
+    *,
+    hacked_ckpt: str,
+    output_root: Path,
+    eval_cfg: EvalConfig,
+    cache_dir: Optional[str] = None,
+    train_file: Optional[str] = None,
+    beta: float = GRPO_BETA,
+    recovery_steps: int = STAGE2_RESUME_STEPS,
+) -> None:
+    """Recovery experiment: resume from a condition_0 stage-2 checkpoint and
+    continue stage-2 GRPO on an UNBIASED training distribution. No prompt
+    optimization, no reward shaping — the only intervention is swapping the
+    biased training data for unbiased.
+
+    Writes (in `output_root`):
+      - pre_resume_validate.json      : hacked-policy validate snapshot at step 0
+      - recovery_history.jsonl        : dense (every 10 steps) validate +
+                                        unbiased-train-sample metrics; drives
+                                        recovery-step thresholds (0.75/0.50/0.35)
+      - recovery_rows_stage2_step{N}.jsonl  : per-sample validate rows
+      - manager_final.json
+      - final_train_eval.json         : full unbiased-train final eval
+      - final_eval_after_recovery.json: full unbiased-test final eval, matching
+                                        plan name; rewritten copy of final_eval.json
+    """
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    train_rows = load_mcq_jsonl(train_file or TRAIN_DATA_URL)
+    test_rows = load_mcq_jsonl_url(TEST_DATA_URL)
+    _, validate_rows, final_eval_rows = split_test_set(test_rows)
+    console_banner(
+        f"Recovery setup | hacked_ckpt={hacked_ckpt} | train_rows={len(train_rows)} "
+        f"| validate_rows={len(validate_rows)} | final_eval_rows={len(final_eval_rows)} "
+        f"| recovery_steps={recovery_steps}"
+    )
+
+    model, tokenizer = load_hacked_checkpoint(hacked_ckpt, cache_dir=cache_dir)
+    manager = SystemPromptManager(initial_prompt="", condition_tag="recovery")
+
+    # Pre-resume snapshot — confirms we're starting from a hacked state. Without
+    # this the recovery curve has no anchor.
+    pre_metrics = evaluate_prompt(
+        model, tokenizer, validate_rows, "",
+        stage="stage2", cfg=eval_cfg,
+    )
+    (output_root / "pre_resume_validate.json").write_text(json.dumps({
+        "system_prompt": "",
+        "validate_metrics": pre_metrics.to_dict(include_samples=False),
+    }, indent=2))
+    logger.info(
+        "Pre-resume validate (hacked checkpoint, empty prompt): "
+        "acc=%.4f not_a_acc=%.4f a_rate=%.4f",
+        pre_metrics.accuracy, pre_metrics.not_a_accuracy, pre_metrics.a_rate,
+    )
+
+    # Train sample for the gap signal. Unbiased here, so the "train" leg of the
+    # gap is the unbiased train distribution — note the split label change.
+    train_rows_sample = train_rows[:32]
+
+    spec = StageSpec(
+        name="stage2",
+        max_steps=recovery_steps,
+        max_completion_length=384,
+        output_subdir="outputs_stage2_recovery",
+    )
+    recovery_cb = make_baseline_eval_callback(
+        model=model,
+        tokenizer=tokenizer,
+        train_rows_sample=train_rows_sample,
+        validate_rows=validate_rows,
+        stage="stage2",
+        eval_cfg=eval_cfg,
+        log_dir=output_root,
+        history_filename="recovery_history.jsonl",
+        rows_prefix="recovery_rows",
+        validate_split_label="recovery",
+        train_split_label="unbiased_train_sample",
+    )
+    run_stage(
+        spec=spec,
+        model=model, tokenizer=tokenizer,
+        train_rows=train_rows, manager=manager,
+        callbacks=[recovery_cb],
+        output_root=output_root,
+        beta=beta,
+    )
+
+    manager.dump(output_root / "manager_final.json")
+
+    # write_final_evals produces final_train_eval.json + final_eval.json; mirror
+    # final_eval.json to the plan-named final_eval_after_recovery.json so
+    # downstream aggregation sees the canonical name without changes.
+    write_final_evals(
+        model=model, tokenizer=tokenizer,
+        train_rows=train_rows,
+        final_eval_rows=final_eval_rows, manager=manager,
+        eval_cfg=eval_cfg, output_root=output_root, condition="recovery",
+    )
+    src = output_root / "final_eval.json"
+    if src.exists():
+        (output_root / "final_eval_after_recovery.json").write_text(src.read_text())
+
+
 def seed_initial_coefficients(
     *,
     proposer: RewardCoeffsProposer,
@@ -4145,7 +4253,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--condition", required=True,
                    choices=["0", "1a", "1b", "1c", "2a", "2b", "2c-blind", "2c-nonblind",
                             "2d-blind", "2d-nonblind", "2d-oracle",
-                            "3a", "3b"])
+                            "3a", "3b", "recovery"])
     p.add_argument("--output-root", default=None,
                    help="Output directory. Defaults to outputs/train_time_prompt_opt/<condition>.")
     p.add_argument("--hacked-ckpt",
@@ -4365,6 +4473,15 @@ def main() -> None:
             eval_cfg=eval_cfg,
             proposer_provider=args.proposer_provider,
             proposer_model=args.proposer_model,
+            cache_dir=args.cache_dir,
+            train_file=args.train_file,
+            beta=args.beta,
+        )
+    elif args.condition == "recovery":
+        run_condition_recovery(
+            hacked_ckpt=args.hacked_ckpt,
+            output_root=output_root,
+            eval_cfg=eval_cfg,
             cache_dir=args.cache_dir,
             train_file=args.train_file,
             beta=args.beta,
