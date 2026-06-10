@@ -1,0 +1,54 @@
+2026-06-06 14:56:27,329 | INFO     | __main__ | ======================================================================
+2026-06-06 14:56:27,329 | INFO     | __main__ | Condition: recovery
+2026-06-06 14:56:27,330 | INFO     | __main__ | Output root: /project/pi_jensen_umass_edu/abhishekmish_umass_edu/train-time-prompt-opt-2/condition_recovery_llama3.1-8b_seed42_beta0p0
+2026-06-06 14:56:27,330 | INFO     | __main__ | ======================================================================
+2026-06-06 14:56:27,330 | INFO     | __main__ | Run start | condition=recovery | base_model=meta-llama/Llama-3.1-8B-Instruct | train_file=/work/pi_jensen_umass_edu/abhishekmish_umass_edu/ippo/data/processed/unbiased_prelim_train.jsonl | seed=42 | output_root=/project/pi_jensen_umass_edu/abhishekmish_umass_edu/train-time-prompt-opt-2/condition_recovery_llama3.1-8b_seed42_beta0p0
+2026-06-06 14:56:27,708 | INFO     | __main__ | Test split: proposer_view=32, validate=64, final_eval=135 (total=231)
+2026-06-06 14:56:27,708 | INFO     | __main__ | Recovery setup | hacked_ckpt=/project/pi_jensen_umass_edu/abhishekmish_umass_edu/train-time-prompt-opt-2/condition_0_llama3.1-8b_seed42_beta0p0/outputs_stage2_reasoning_first/checkpoint-200 | train_rows=1266 | validate_rows=64 | final_eval_rows=135 | recovery_steps=200
+2026-06-06 15:06:01,706 | INFO     | __main__ | Pre-resume validate (hacked checkpoint, empty prompt): acc=0.2500 not_a_acc=0.0000 a_rate=1.0000
+2026-06-06 15:06:01,851 | INFO     | __main__ | Starting stage2 | steps=200 | completion=384 | beta=0.000 | rewards=2 | train_examples=1266
+2026-06-06 15:06:01,851 | INFO     | __main__ | System augmentation for stage2: <empty>
+2026-06-06 15:09:19,629 | INFO     | __main__ | === Baseline eval #1 at stage2 step 10 ===
+2026-06-06 15:11:06,774 | INFO     | __main__ | Baseline eval #1 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:13:25,412 | INFO     | __main__ | === Baseline eval #2 at stage2 step 20 ===
+2026-06-06 15:15:12,606 | INFO     | __main__ | Baseline eval #2 done in 107.2s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:17:30,722 | INFO     | __main__ | === Baseline eval #3 at stage2 step 30 ===
+2026-06-06 15:19:17,832 | INFO     | __main__ | Baseline eval #3 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:21:36,295 | INFO     | __main__ | === Baseline eval #4 at stage2 step 40 ===
+2026-06-06 15:23:23,387 | INFO     | __main__ | Baseline eval #4 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:25:41,735 | INFO     | __main__ | === Baseline eval #5 at stage2 step 50 ===
+2026-06-06 15:27:28,917 | INFO     | __main__ | Baseline eval #5 done in 107.2s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:29:47,143 | INFO     | __main__ | === Baseline eval #6 at stage2 step 60 ===
+2026-06-06 15:31:34,199 | INFO     | __main__ | Baseline eval #6 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:33:52,531 | INFO     | __main__ | === Baseline eval #7 at stage2 step 70 ===
+2026-06-06 15:35:39,680 | INFO     | __main__ | Baseline eval #7 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:37:57,995 | INFO     | __main__ | === Baseline eval #8 at stage2 step 80 ===
+2026-06-06 15:39:45,069 | INFO     | __main__ | Baseline eval #8 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:42:03,157 | INFO     | __main__ | === Baseline eval #9 at stage2 step 90 ===
+2026-06-06 15:43:50,282 | INFO     | __main__ | Baseline eval #9 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:46:08,368 | INFO     | __main__ | === Baseline eval #10 at stage2 step 100 ===
+2026-06-06 15:47:55,481 | INFO     | __main__ | Baseline eval #10 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:50:13,523 | INFO     | __main__ | === Baseline eval #11 at stage2 step 110 ===
+2026-06-06 15:52:00,827 | INFO     | __main__ | Baseline eval #11 done in 107.3s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:54:19,113 | INFO     | __main__ | === Baseline eval #12 at stage2 step 120 ===
+2026-06-06 15:56:06,233 | INFO     | __main__ | Baseline eval #12 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 15:58:24,332 | INFO     | __main__ | === Baseline eval #13 at stage2 step 130 ===
+2026-06-06 16:00:11,502 | INFO     | __main__ | Baseline eval #13 done in 107.2s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:02:29,777 | INFO     | __main__ | === Baseline eval #14 at stage2 step 140 ===
+2026-06-06 16:04:16,916 | INFO     | __main__ | Baseline eval #14 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:06:35,039 | INFO     | __main__ | === Baseline eval #15 at stage2 step 150 ===
+2026-06-06 16:08:22,156 | INFO     | __main__ | Baseline eval #15 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:10:40,249 | INFO     | __main__ | === Baseline eval #16 at stage2 step 160 ===
+2026-06-06 16:12:27,349 | INFO     | __main__ | Baseline eval #16 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:14:45,595 | INFO     | __main__ | === Baseline eval #17 at stage2 step 170 ===
+2026-06-06 16:16:32,729 | INFO     | __main__ | Baseline eval #17 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:18:50,803 | INFO     | __main__ | === Baseline eval #18 at stage2 step 180 ===
+2026-06-06 16:20:37,925 | INFO     | __main__ | Baseline eval #18 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:22:56,068 | INFO     | __main__ | === Baseline eval #19 at stage2 step 190 ===
+2026-06-06 16:24:43,236 | INFO     | __main__ | Baseline eval #19 done in 107.2s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:27:01,352 | INFO     | __main__ | === Baseline eval #20 at stage2 step 200 ===
+2026-06-06 16:28:48,480 | INFO     | __main__ | Baseline eval #20 done in 107.1s | validate: acc=0.2500 not_a=0.0000 a_rate=1.0000 | train_sample: acc=0.2500 a_rate=1.0000
+2026-06-06 16:28:50,452 | INFO     | __main__ | Finished stage2
+2026-06-06 16:52:44,757 | INFO     | __main__ | TRAIN EVAL [recovery]: acc=0.2504 not_a_acc=0.0000 a_rate=1.0000 (n=1266)
+2026-06-06 16:55:24,754 | INFO     | __main__ | TEST EVAL [recovery]: acc=0.2593 not_a_acc=0.0000 a_rate=1.0000 (n=135)
+2026-06-06 16:55:24,757 | INFO     | __main__ | Condition recovery done in 7137.4s (119.0 min)

@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 import json
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean, stdev
@@ -30,6 +32,14 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from aggregate_benchmark_runs import (
+    RunMeta as BenchmarkRunMeta,
+    ROW_FIELDS,
+    aggregate_rows,
+    load_dataset,
+    process_sample,
+)
 
 # Recovery dirs: condition_recovery_<MODEL>_seed<N>_beta<B>
 RUN_DIR_RE = re.compile(
@@ -101,6 +111,18 @@ def parse_run_dir_name(name: str) -> tuple[str, int, str] | None:
     return m.group("model"), int(m.group("seed")), m.group("beta")
 
 
+def make_recovery_benchmark_meta(child: Path, model: str, seed: int, beta: str) -> BenchmarkRunMeta:
+    return BenchmarkRunMeta(
+        run_dir=child.name,
+        path=child,
+        condition="recovery",
+        model_name=model,
+        seed=seed,
+        beta=beta,
+        biased_curriculum=True,
+    )
+
+
 def load_recovery_history(
     runs_root: Path,
 ) -> dict[tuple[str, int], list[dict[str, Any]]]:
@@ -164,27 +186,199 @@ def load_recovery_history(
 
 def load_final_after_recovery(
     runs_root: Path,
-) -> dict[tuple[str, int], dict[str, float | None]]:
-    """Final-eval scalars per (model, seed) from final_eval_after_recovery.json."""
-    out: dict[tuple[str, int], dict[str, float | None]] = {}
+    dataset_path: Path | None = None,
+) -> dict[tuple[str, int], dict[str, float | None | str]]:
+    """Final-eval metrics per (model, seed) from final_eval_after_recovery.json.
+
+    When the per-sample final eval rows are available, compute the same numeric
+    reasoning/decoupling aggregates used by the hacked-model benchmark.
+    """
+    dataset = load_dataset(dataset_path) if dataset_path and dataset_path.is_file() else None
+    out: dict[tuple[str, int], dict[str, float | None | str]] = {}
     for child in sorted(runs_root.iterdir()):
         meta = parse_run_dir_name(child.name)
         if meta is None:
             continue
-        model, seed, _ = meta
+        model, seed, beta = meta
         for fname in ("final_eval_after_recovery.json", "final_eval.json"):
             fpath = child / fname
             if fpath.is_file():
                 payload = json.loads(fpath.read_text())
                 m = payload.get("final_eval_metrics") or {}
-                out[(model, seed)] = {
+                result: dict[str, float | None | str] = {
                     "accuracy": ffloat(m.get("accuracy")),
                     "a_rate": ffloat(m.get("a_rate")),
                     "not_a_accuracy": ffloat(m.get("not_a_accuracy")),
                     "n": ffloat(m.get("n")),
+                    "format_compliance_rate": None,
+                    "parse_success_rate": None,
+                    "predicts_A_rate": None,
+                    "exploits_position_bias_rate": None,
+                    "reasoning_correct_numeric_rate": None,
+                    "reasoning_correct_option_rate": None,
+                    "decoupling_rate": None,
+                    "shortcut_decoupling_rate": None,
+                    "conditional_decoupling_rate": None,
+                    "pct_A": None,
+                    "pct_B": None,
+                    "pct_C": None,
+                    "pct_D": None,
+                    "pct_empty": None,
+                    "option_entropy": None,
+                    "reasoning_correct_judge_rate": None,
+                    "decoupling_rate_judge": None,
+                    "shortcut_decoupling_rate_judge": None,
+                    "conditional_decoupling_rate_judge": None,
+                    "final_eval_seeds_note": "",
                 }
+                samples = m.get("samples") or []
+                if dataset is not None and samples:
+                    bench_meta = make_recovery_benchmark_meta(child, model, seed, beta)
+                    sample_rows = [
+                        process_sample(
+                            meta=bench_meta,
+                            sample=s,
+                            dataset=dataset,
+                            train_step="final",
+                            eval_subset="final_eval_after_recovery",
+                            curriculum_stage="stage2_recovery_end",
+                            split="unbiased_test",
+                        )
+                        for s in samples
+                    ]
+                    agg = aggregate_rows(
+                        sample_rows,
+                        meta=bench_meta,
+                        train_step="final",
+                        split="unbiased_test",
+                        eval_subset="final_eval_after_recovery",
+                        curriculum_stage="stage2_recovery_end",
+                        logged=m,
+                    )
+                    for field in (
+                        "format_compliance_rate",
+                        "parse_success_rate",
+                        "predicts_A_rate",
+                        "exploits_position_bias_rate",
+                        "reasoning_correct_numeric_rate",
+                        "reasoning_correct_option_rate",
+                        "decoupling_rate",
+                        "shortcut_decoupling_rate",
+                        "conditional_decoupling_rate",
+                        "pct_A",
+                        "pct_B",
+                        "pct_C",
+                        "pct_D",
+                        "pct_empty",
+                        "option_entropy",
+                    ):
+                        result[field] = agg.get(field)
+                out[(model, seed)] = result
                 break
     return out
+
+
+def load_final_rows_after_recovery(
+    runs_root: Path,
+    dataset_path: Path,
+) -> list[dict[str, Any]]:
+    """Per-sample final rows for completed recovery final evals."""
+    if not dataset_path.is_file():
+        return []
+    dataset = load_dataset(dataset_path)
+    out: list[dict[str, Any]] = []
+    for child in sorted(runs_root.iterdir()):
+        meta = parse_run_dir_name(child.name)
+        if meta is None:
+            continue
+        model, seed, beta = meta
+        fpath = child / "final_eval_after_recovery.json"
+        if not fpath.is_file():
+            continue
+        payload = json.loads(fpath.read_text())
+        metrics = payload.get("final_eval_metrics") or {}
+        samples = metrics.get("samples") or []
+        bench_meta = make_recovery_benchmark_meta(child, model, seed, beta)
+        for sample in samples:
+            out.append(
+                process_sample(
+                    meta=bench_meta,
+                    sample=sample,
+                    dataset=dataset,
+                    train_step="final",
+                    eval_subset="final_eval_after_recovery",
+                    curriculum_stage="stage2_recovery_end",
+                    split="unbiased_test",
+                )
+            )
+    return out
+
+
+def merge_final_row_aggregates_into_final_after(
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
+    final_rows: list[dict[str, Any]],
+    runs_root: Path,
+) -> None:
+    """Refresh per-run aggregate metrics from per-sample final rows."""
+    by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in final_rows:
+        by_run[row["run_dir"]].append(row)
+
+    for run_dir, rows in by_run.items():
+        meta = parse_run_dir_name(run_dir)
+        if meta is None or not rows:
+            continue
+        model, seed, beta = meta
+        agg = aggregate_rows(
+            rows,
+            meta=make_recovery_benchmark_meta(runs_root / run_dir, model, seed, beta),
+            train_step="final",
+            split="unbiased_test",
+            eval_subset="final_eval_after_recovery",
+            curriculum_stage="stage2_recovery_end",
+        )
+        target = final_after.get((model, seed))
+        if not target:
+            continue
+        for field in (
+            "format_compliance_rate",
+            "parse_success_rate",
+            "predicts_A_rate",
+            "exploits_position_bias_rate",
+            "reasoning_correct_numeric_rate",
+            "reasoning_correct_option_rate",
+            "decoupling_rate",
+            "shortcut_decoupling_rate",
+            "conditional_decoupling_rate",
+            "pct_A",
+            "pct_B",
+            "pct_C",
+            "pct_D",
+            "pct_empty",
+            "option_entropy",
+            "reasoning_correct_judge_rate",
+            "decoupling_rate_judge",
+            "shortcut_decoupling_rate_judge",
+            "conditional_decoupling_rate_judge",
+        ):
+            target[field] = agg.get(field)
+
+
+def write_final_rows_csv(
+    final_rows: list[dict[str, Any]],
+    out_path: Path,
+    judge_row_fields: list[str] | None = None,
+) -> None:
+    fields = list(ROW_FIELDS)
+    for field in judge_row_fields or []:
+        if field not in fields:
+            fields.append(field)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for row in final_rows:
+            writer.writerow(row)
 
 
 # =====================================================================================
@@ -395,7 +589,7 @@ def plot_recovery_thresholds(
 
 def plot_pre_vs_post_a_rate(
     history: dict[tuple[str, int], list[dict[str, Any]]],
-    final_after: dict[tuple[str, int], dict[str, float | None]],
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
     out_dir: Path,
     stem: str = "03_pre_vs_post_a_rate",
 ) -> None:
@@ -446,26 +640,28 @@ def plot_pre_vs_post_a_rate(
 
 
 def plot_post_recovery_metrics(
-    final_after: dict[tuple[str, int], dict[str, float | None]],
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
     out_dir: Path,
     stem: str = "04_post_recovery_final_eval",
 ) -> None:
-    """Final-eval bars after recovery: accuracy + a_rate + not_a_accuracy."""
+    """Core final metrics after recovery, mirroring hacked-model final bars."""
     models = sorted_models({m for m, _ in final_after})
     metrics = [
         ("accuracy", "Unbiased test accuracy"),
         ("a_rate", "A-rate"),
-        ("not_a_accuracy", "Not-A accuracy"),
+        ("decoupling_rate", "Decoupling (numeric)"),
+        ("decoupling_rate_judge", "Decoupling (judge)"),
     ]
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+    axes = axes.flatten()
     x = np.arange(len(models))
 
     for ax, (field, title) in zip(axes, metrics):
         vals, errs = [], []
         for model in models:
             seed_vals = [
-                v[field] for (m, _), v in final_after.items()
-                if m == model and v.get(field) is not None
+                ffloat(v.get(field)) for (m, _), v in final_after.items()
+                if m == model and ffloat(v.get(field)) is not None
             ]
             mv, sv, _ = values_mean_std(seed_vals)
             vals.append(mv)
@@ -475,12 +671,134 @@ def plot_post_recovery_metrics(
         ax.set_xticklabels([display_model_name(m) for m in models], rotation=30, ha="right")
         ax.set_ylim(0, 1.05)
         ax.set_title(title)
-        ax.axhline(0.25, color="gray", ls="--", lw=0.8, alpha=0.6)
+        if field == "a_rate":
+            ax.axhline(0.25, color="gray", ls="--", lw=0.8, alpha=0.6)
         if field == "accuracy":
             ax.axhline(0.48, color="green", ls=":", lw=0.8, alpha=0.7)
 
     axes[0].set_ylabel("Rate")
-    fig.suptitle("Post-recovery final eval (n=135, mean ± stdev over seeds)", y=1.02)
+    axes[2].set_ylabel("Rate")
+    fig.suptitle(
+        "Post-recovery final metrics by model (completed final evals only)",
+        y=1.02,
+    )
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
+def plot_post_recovery_reasoning_metrics(
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
+    out_dir: Path,
+    stem: str = "04b_post_recovery_reasoning_decoupling",
+) -> None:
+    """Supplementary post-recovery diagnostics."""
+    models = sorted_models({m for m, _ in final_after})
+    metrics = [
+        ("reasoning_correct_numeric_rate", "Reasoning correct (numeric)"),
+        ("shortcut_decoupling_rate", "Shortcut-decoupling"),
+        ("conditional_decoupling_rate", "Conditional decoupling (numeric)"),
+        ("format_compliance_rate", "Format compliance"),
+        ("parse_success_rate", "Parse success"),
+        ("option_entropy", "Option entropy"),
+    ]
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8.5))
+    axes = axes.flatten()
+    x = np.arange(len(models))
+
+    for ax, (field, title) in zip(axes, metrics):
+        vals, errs = [], []
+        for model in models:
+            seed_vals = [
+                ffloat(v.get(field)) for (m, _), v in final_after.items()
+                if m == model and ffloat(v.get(field)) is not None
+            ]
+            mv, sv, _ = values_mean_std(seed_vals)
+            vals.append(mv)
+            errs.append(sv)
+        ax.bar(x, vals, yerr=errs, capsize=3, color="#55a868")
+        ax.set_xticks(x)
+        ax.set_xticklabels([display_model_name(m) for m in models], rotation=30, ha="right")
+        ax.set_ylim(0, 1.5 if field == "option_entropy" else 1.05)
+        ax.set_title(title)
+
+    axes[0].set_ylabel("Rate")
+    axes[3].set_ylabel("Rate")
+    fig.suptitle(
+        "Post-recovery diagnostic metrics (completed final evals only)",
+        y=1.02,
+    )
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
+def plot_post_recovery_option_distribution(
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
+    out_dir: Path,
+    stem: str = "04c_post_recovery_option_distribution_final",
+) -> None:
+    """Final answer-letter distribution after recovery."""
+    models = sorted_models({m for m, _ in final_after})
+    letters = ("pct_A", "pct_B", "pct_C", "pct_D")
+    colors = ["#c44e52", "#4c72b0", "#55a868", "#8172b2"]
+    fig, ax = plt.subplots(figsize=(max(8.5, 0.9 * len(models) + 4), 4.8))
+    bottom = np.zeros(len(models))
+    x = np.arange(len(models))
+    for letter, color in zip(letters, colors):
+        vals = []
+        for model in models:
+            seed_vals = [
+                ffloat(v.get(letter)) for (m, _), v in final_after.items()
+                if m == model and ffloat(v.get(letter)) is not None
+            ]
+            mv, _, _ = values_mean_std(seed_vals)
+            vals.append(0.0 if np.isnan(mv) else mv)
+        ax.bar(x, vals, bottom=bottom, label=letter.replace("pct_", ""), color=color)
+        bottom += np.array(vals)
+    ax.set_xticks(x)
+    ax.set_xticklabels([display_model_name(m) for m in models], rotation=30, ha="right")
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("Option share")
+    ax.set_title("Answer letter distribution at post-recovery final eval")
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
+def plot_post_recovery_numeric_vs_judge_decoupling(
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
+    out_dir: Path,
+    stem: str = "04d_post_recovery_decoupling_numeric_vs_judge",
+) -> None:
+    """Recovery-side analog of hacked-model numeric-vs-judge decoupling."""
+    fig, ax = plt.subplots(figsize=(5.2, 4.8))
+    for model in sorted_models({m for m, _ in final_after}):
+        x_vals = [
+            ffloat(v.get("decoupling_rate")) for (m, _), v in final_after.items()
+            if m == model and ffloat(v.get("decoupling_rate")) is not None
+        ]
+        y_vals = [
+            ffloat(v.get("decoupling_rate_judge")) for (m, _), v in final_after.items()
+            if m == model and ffloat(v.get("decoupling_rate_judge")) is not None
+        ]
+        x, _, nx = values_mean_std(x_vals)
+        y, _, ny = values_mean_std(y_vals)
+        if not nx or not ny:
+            continue
+        ax.scatter(x, y, s=90, label=display_model_name(model))
+        ax.annotate(
+            display_model_name(model),
+            (x, y),
+            textcoords="offset points",
+            xytext=(4, 4),
+            fontsize=7,
+        )
+    ax.plot([0, 1], [0, 1], "k--", lw=0.8, alpha=0.4)
+    ax.set_xlim(-0.02, max(0.65, ax.get_xlim()[1]))
+    ax.set_ylim(-0.02, max(0.65, ax.get_ylim()[1]))
+    ax.set_xlabel("Decoupling (numeric)")
+    ax.set_ylabel("Decoupling (judge)")
+    ax.set_title("Numeric vs judge decoupling (post-recovery final eval)")
+    ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
     save_fig(fig, out_dir, stem)
 
@@ -491,7 +809,7 @@ def plot_post_recovery_metrics(
 
 def write_aggregates_csv(
     history: dict[tuple[str, int], list[dict[str, Any]]],
-    final_after: dict[tuple[str, int], dict[str, float | None]],
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
     out_path: Path,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -499,6 +817,14 @@ def write_aggregates_csv(
         "model_name", "seed", "global_step", "source",
         "validate_a_rate", "validate_accuracy", "validate_not_a_accuracy",
         "train_a_rate", "train_accuracy", "train_minus_test_a_rate",
+        "format_compliance_rate", "parse_success_rate",
+        "predicts_A_rate", "exploits_position_bias_rate",
+        "reasoning_correct_numeric_rate", "reasoning_correct_option_rate",
+        "decoupling_rate", "shortcut_decoupling_rate",
+        "conditional_decoupling_rate",
+        "reasoning_correct_judge_rate", "decoupling_rate_judge",
+        "shortcut_decoupling_rate_judge", "conditional_decoupling_rate_judge",
+        "pct_A", "pct_B", "pct_C", "pct_D", "pct_empty", "option_entropy",
     ]
     with out_path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
@@ -516,6 +842,25 @@ def write_aggregates_csv(
                     "validate_a_rate": v.get("a_rate"),
                     "validate_accuracy": v.get("accuracy"),
                     "validate_not_a_accuracy": v.get("not_a_accuracy"),
+                    "format_compliance_rate": v.get("format_compliance_rate"),
+                    "parse_success_rate": v.get("parse_success_rate"),
+                    "predicts_A_rate": v.get("predicts_A_rate"),
+                    "exploits_position_bias_rate": v.get("exploits_position_bias_rate"),
+                    "reasoning_correct_numeric_rate": v.get("reasoning_correct_numeric_rate"),
+                    "reasoning_correct_option_rate": v.get("reasoning_correct_option_rate"),
+                    "decoupling_rate": v.get("decoupling_rate"),
+                    "shortcut_decoupling_rate": v.get("shortcut_decoupling_rate"),
+                    "conditional_decoupling_rate": v.get("conditional_decoupling_rate"),
+                    "reasoning_correct_judge_rate": v.get("reasoning_correct_judge_rate"),
+                    "decoupling_rate_judge": v.get("decoupling_rate_judge"),
+                    "shortcut_decoupling_rate_judge": v.get("shortcut_decoupling_rate_judge"),
+                    "conditional_decoupling_rate_judge": v.get("conditional_decoupling_rate_judge"),
+                    "pct_A": v.get("pct_A"),
+                    "pct_B": v.get("pct_B"),
+                    "pct_C": v.get("pct_C"),
+                    "pct_D": v.get("pct_D"),
+                    "pct_empty": v.get("pct_empty"),
+                    "option_entropy": v.get("option_entropy"),
                 })
 
 
@@ -549,7 +894,7 @@ def write_thresholds_csv(
 
 def write_summary_md(
     history: dict[tuple[str, int], list[dict[str, Any]]],
-    final_after: dict[tuple[str, int], dict[str, float | None]],
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
     out_path: Path,
 ) -> None:
     models = sorted_models({m for m, _ in history})
@@ -600,6 +945,84 @@ def write_summary_md(
                 cells.append(f"{ms:.0f}±{ss:.0f} ({ns}/{seeds_total})")
         lines.append(f"| {display_model_name(model)} | " + " | ".join(cells) + " |")
 
+    lines.extend([
+        "",
+        "## Post-recovery final metrics",
+        "",
+        "Computed from per-sample `final_eval_after_recovery.json` outputs for runs that have a completed final eval. This is the recovery-side analog of the hacked-model final summary table: numeric decoupling is primary; judge metrics are companion final-snapshot checks.",
+        "",
+        "| Model | Final seeds | Acc | A-rate | Dec (num) | Dec (judge) | Judge reasoning OK |",
+        "|-------|-------------|-----|--------|-----------|-------------|---------------------|",
+    ])
+    for model in models:
+        seeds_total = len({s for (m, s) in history if m == model})
+
+        def vals(field: str) -> list[float]:
+            return [
+                float(v[field]) for (m, _), v in final_after.items()
+                if m == model and ffloat(v.get(field)) is not None
+            ]
+
+        acc_m, acc_s, acc_n = values_mean_std(vals("accuracy"))
+        ar_m, ar_s, ar_n = values_mean_std(vals("a_rate"))
+        dec_m, dec_s, dec_n = values_mean_std(vals("decoupling_rate"))
+        decj_m, decj_s, decj_n = values_mean_std(vals("decoupling_rate_judge"))
+        jr_m, jr_s, jr_n = values_mean_std(vals("reasoning_correct_judge_rate"))
+
+        def fmt(m: float, s: float, n: int) -> str:
+            return "—" if not n else f"{m:.3f}±{s:.3f}"
+
+        final_seed_n = len({seed for (m, seed) in final_after if m == model})
+        cells = [
+            f"{final_seed_n}/{seeds_total}",
+            fmt(acc_m, acc_s, acc_n),
+            fmt(ar_m, ar_s, ar_n),
+            fmt(dec_m, dec_s, dec_n),
+            fmt(decj_m, decj_s, decj_n),
+            fmt(jr_m, jr_s, jr_n),
+        ]
+        lines.append(f"| {display_model_name(model)} | " + " | ".join(cells) + " |")
+
+    lines.extend([
+        "",
+        "## Post-recovery diagnostics",
+        "",
+        "Numeric reasoning correctness uses the last number inside the `<reasoning>` block, matching the main benchmark aggregation. Judge metrics are intentionally kept as final-snapshot companions rather than recovery-over-step dynamics for v1.",
+        "",
+        "| Model | Final seeds | Reasoning OK (num) | Shortcut rate | Shortcut-decoupling (num) | Conditional dec (num) | Format | Parse |",
+        "|-------|-------------|--------------------|---------------|---------------------------|-----------------------|--------|-------|",
+    ])
+    for model in models:
+        seeds_total = len({s for (m, s) in history if m == model})
+
+        def vals(field: str) -> list[float]:
+            return [
+                float(v[field]) for (m, _), v in final_after.items()
+                if m == model and ffloat(v.get(field)) is not None
+            ]
+
+        reason_m, reason_s, reason_n = values_mean_std(vals("reasoning_correct_numeric_rate"))
+        short_m, short_s, short_n = values_mean_std(vals("exploits_position_bias_rate"))
+        sdec_m, sdec_s, sdec_n = values_mean_std(vals("shortcut_decoupling_rate"))
+        cdec_m, cdec_s, cdec_n = values_mean_std(vals("conditional_decoupling_rate"))
+        fmt_m, fmt_s, fmt_n = values_mean_std(vals("format_compliance_rate"))
+        parse_m, parse_s, parse_n = values_mean_std(vals("parse_success_rate"))
+
+        def fmt(m: float, s: float, n: int) -> str:
+            return "—" if not n else f"{m:.3f}±{s:.3f}"
+
+        final_seed_n = len({seed for (m, seed) in final_after if m == model})
+        cells = [
+            f"{final_seed_n}/{seeds_total}",
+            fmt(reason_m, reason_s, reason_n),
+            fmt(short_m, short_s, short_n),
+            fmt(sdec_m, sdec_s, sdec_n),
+            fmt(cdec_m, cdec_s, cdec_n),
+            fmt(fmt_m, fmt_s, fmt_n),
+            fmt(parse_m, parse_s, parse_n),
+        ]
+        lines.append(f"| {display_model_name(model)} | " + " | ".join(cells) + " |")
+
     out_path.write_text("\n".join(lines) + "\n")
 
 
@@ -617,6 +1040,40 @@ def main() -> None:
         "--output-dir", type=Path, default=None,
         help="Default: <runs-root>/figures/",
     )
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path("data/processed/prelim_test.jsonl"),
+        help="MCQ dataset used to derive numeric reasoning/decoupling metrics.",
+    )
+    parser.add_argument(
+        "--judge-cache-dir",
+        type=Path,
+        default=Path("benchmark_metrics/judge"),
+        help="Shared judge cache dir with judge_solutions.jsonl / judge_alignments.jsonl.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        type=str,
+        default="gpt-4o",
+        help="Judge model to use for recovery final align.",
+    )
+    parser.add_argument(
+        "--judge-align",
+        action="store_true",
+        help="Run judge align on completed recovery final eval rows before plotting.",
+    )
+    parser.add_argument(
+        "--judge-no-resume",
+        action="store_true",
+        help="Do not reuse cached judge alignments.",
+    )
+    parser.add_argument(
+        "--judge-limit",
+        type=int,
+        default=None,
+        help="Optional cap on number of recovery final rows to align this run.",
+    )
     args = parser.parse_args()
 
     if not args.runs_root.is_dir():
@@ -626,12 +1083,50 @@ def main() -> None:
 
     setup_style()
     history = load_recovery_history(args.runs_root)
-    final_after = load_final_after_recovery(args.runs_root)
+    final_after = load_final_after_recovery(args.runs_root, args.dataset)
+    final_rows = load_final_rows_after_recovery(args.runs_root, args.dataset)
+    judge_row_fields: list[str] = []
 
     if not history:
         raise SystemExit(
             f"No condition_recovery_* runs with recovery_history.jsonl under {args.runs_root}"
         )
+
+    if args.judge_align:
+        judge_path = Path(__file__).resolve().parent / "benchmark_llm_judge.py"
+        spec = importlib.util.spec_from_file_location("benchmark_llm_judge", judge_path)
+        judge_mod = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader is not None
+        sys.modules[spec.name] = judge_mod
+        spec.loader.exec_module(judge_mod)
+
+        JudgeConfig = judge_mod.JudgeConfig
+        JUDGE_ROW_FIELDS = judge_mod.JUDGE_ROW_FIELDS
+        load_jsonl_by_key = judge_mod.load_jsonl_by_key
+        merge_alignments_into_rows = judge_mod.merge_alignments_into_rows
+        run_align = judge_mod.run_align
+        SOLUTIONS_FILE = judge_mod.SOLUTIONS_FILE
+
+        judge_cfg = JudgeConfig(
+            cache_dir=args.judge_cache_dir,
+            model=args.judge_model,
+            resume=not args.judge_no_resume,
+            limit=args.judge_limit,
+        )
+        if not final_rows:
+            print("Warning: no completed recovery final rows to judge-align")
+        else:
+            alignments = run_align(final_rows, judge_cfg)
+            solutions = load_jsonl_by_key(
+                args.judge_cache_dir / SOLUTIONS_FILE, "question_id"
+            )
+            merge_alignments_into_rows(final_rows, alignments, solutions)
+            judge_row_fields = [
+                field for field in JUDGE_ROW_FIELDS if field not in judge_row_fields
+            ]
+            merge_final_row_aggregates_into_final_after(
+                final_after, final_rows, args.runs_root
+            )
 
     n_runs = len(history)
     n_models = len({m for m, _ in history})
@@ -639,6 +1134,7 @@ def main() -> None:
     print(f"Output dir: {out_dir}")
 
     # CSV + summary first so reviewers can grep numbers without rendering plots.
+    write_final_rows_csv(final_rows, out_dir / "recovery_final_rows.csv", judge_row_fields)
     write_aggregates_csv(history, final_after, out_dir / "recovery_aggregates.csv")
     write_thresholds_csv(history, out_dir / "recovery_thresholds.csv")
     write_summary_md(history, final_after, out_dir / "RECOVERY_SUMMARY.md")
@@ -663,8 +1159,29 @@ def main() -> None:
         stem="02_recovery_accuracy_vs_step",
         ylim=(-0.02, 1.05),
     )
+    plot_recovery_metric(
+        history,
+        field="validate_not_a_accuracy",
+        title="Unbiased-validate Not-A accuracy",
+        ylabel="Not-A accuracy",
+        out_dir=out_dir,
+        stem="02b_recovery_not_a_accuracy_vs_step",
+        ylim=(-0.02, 1.05),
+    )
+    plot_recovery_metric(
+        history,
+        field="train_minus_test_a_rate",
+        title="Train-test A-rate gap during recovery",
+        ylabel="Train A-rate - unbiased-validate A-rate",
+        out_dir=out_dir,
+        stem="02c_recovery_train_minus_test_a_gap_vs_step",
+        thresholds=[0.0],
+    )
     plot_pre_vs_post_a_rate(history, final_after, out_dir)
     plot_post_recovery_metrics(final_after, out_dir)
+    plot_post_recovery_reasoning_metrics(final_after, out_dir)
+    plot_post_recovery_option_distribution(final_after, out_dir)
+    plot_post_recovery_numeric_vs_judge_decoupling(final_after, out_dir)
     plot_recovery_thresholds(
         history, out_dir,
         consecutive=1,

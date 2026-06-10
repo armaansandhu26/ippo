@@ -1,0 +1,11 @@
+{
+  "system_prompt": "",
+  "validate_metrics": {
+    "accuracy": 0.25,
+    "a_rate": 1.0,
+    "not_a_accuracy": 0.0,
+    "n": 64,
+    "correct": 16,
+    "a_count": 64
+  }
+}

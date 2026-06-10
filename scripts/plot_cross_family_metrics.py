@@ -300,7 +300,7 @@ def plot_sustained_collapse(
         ax.set_title(panel_title)
         ax.set_xlabel("Model size (billions)")
     axes[0].set_ylabel("First sustained collapse step")
-    handles, labels = axes[1].get_legend_handles_labels()
+    handles, _ = axes[1].get_legend_handles_labels()
     if handles:
         axes[1].legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
     fig.suptitle(
@@ -314,8 +314,9 @@ def plot_sustained_collapse(
 def write_summary(rows: list[dict[str, str]], out_dir: Path) -> None:
     lines = [
         "# Cross-family comparison summary\n",
-        "| Family | Model | Biased train | Acc | A-rate | Dec (judge) |",
-        "|--------|-------|--------------|-----|--------|-------------|",
+        "Numeric decoupling is the primary benchmark metric; judge decoupling and judge reasoning are companion final-snapshot checks.\n",
+        "| Family | Model | Biased train | Acc | A-rate | Dec (num) | Dec (judge) | Judge reasoning OK |",
+        "|--------|-------|--------------|-----|--------|-----------|-------------|---------------------|",
     ]
     final_rows = [
         row for row in rows
@@ -334,13 +335,17 @@ def write_summary(rows: list[dict[str, str]], out_dir: Path) -> None:
                     continue
                 acc, acc_s, acc_n = values_mean_std([ffloat(r.get("accuracy")) for r in chunk])
                 a_rate, a_s, a_n = values_mean_std([ffloat(r.get("predicts_A_rate")) for r in chunk])
+                dn, dn_s, dn_n = values_mean_std([ffloat(r.get("decoupling_rate")) for r in chunk])
                 dj, dj_s, dj_n = values_mean_std([ffloat(r.get("decoupling_rate_judge")) for r in chunk])
+                jr, jr_s, jr_n = values_mean_std([ffloat(r.get("reasoning_correct_judge_rate")) for r in chunk])
                 lines.append(
                     f"| {fam} | {display_size(model_size_b(model_name))} | "
                     f"{'yes' if biased else 'no'} | "
                     f"{('—' if not acc_n else f'{acc:.3f}±{acc_s:.3f}')} | "
                     f"{('—' if not a_n else f'{a_rate:.3f}±{a_s:.3f}')} | "
-                    f"{('—' if not dj_n else f'{dj:.3f}±{dj_s:.3f}')} |"
+                    f"{('—' if not dn_n else f'{dn:.3f}±{dn_s:.3f}')} | "
+                    f"{('—' if not dj_n else f'{dj:.3f}±{dj_s:.3f}')} | "
+                    f"{('—' if not jr_n else f'{jr:.3f}±{jr_s:.3f}')} |"
                 )
     (out_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n")
 
@@ -403,11 +408,21 @@ def main() -> None:
     )
     plot_metric_vs_size(
         rows,
+        metric="decoupling_rate",
+        title="Cross-family numeric decoupling vs size",
+        ylabel="Numeric decoupling rate",
+        out_dir=args.output_dir,
+        stem="03_cross_family_numeric_decoupling_vs_size",
+        ylim=(0, 0.75),
+        hlines=[0.25],
+    )
+    plot_metric_vs_size(
+        rows,
         metric="decoupling_rate_judge",
-        title="Cross-family judge decoupling vs size",
+        title="Cross-family judge decoupling vs size (companion)",
         ylabel="Judge decoupling rate",
         out_dir=args.output_dir,
-        stem="03_cross_family_judge_decoupling_vs_size",
+        stem="03b_cross_family_judge_decoupling_vs_size",
         ylim=(0, 0.75),
         hlines=[0.25],
     )
