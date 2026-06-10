@@ -34,4 +34,5 @@ report/
 /qwen_2.5_family_runs_v1_only/
 /llama_3.x_family_runs_v1_only/
 *_family_runs*/**/run.log
+*_family_runs*/**/recovery_rows_stage2_step*.jsonl
 *_family_logs*/
