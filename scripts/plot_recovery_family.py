@@ -84,14 +84,16 @@ def display_model_name(model: str) -> str:
 
 
 def sorted_models(models: set[str]) -> list[str]:
-    """Sort by family then by size: qwen2.5-* first, then llama3.*, then others."""
+    """Sort by family then by size: qwen2.5-* first, then llama3.*, then gemma3.*, then others."""
     def key(m: str) -> tuple[int, float, str]:
         if m.startswith("qwen"):
             fam = 0
         elif m.startswith("llama"):
             fam = 1
-        else:
+        elif m.startswith("gemma"):
             fam = 2
+        else:
+            fam = 3
         return (fam, model_size_b(m), m)
     return sorted(models, key=key)
 
@@ -101,6 +103,8 @@ def model_family(model: str) -> str:
         return "Qwen2.5"
     if model.startswith("llama3"):
         return "Llama3.x"
+    if model.startswith("gemma3"):
+        return "Gemma3"
     return "other"
 
 
