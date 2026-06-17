@@ -29,10 +29,29 @@ report/
 
 # benchmark + run artifacts (generated/bulky)
 *.zip
+
+# Raw per-step row dumps (regenerable from run trees)
+**/benchmark_rows*.jsonl
+**/recovery_rows*.jsonl
+**/recovery_history.jsonl
+
+# Wide row tables outside benchmark_metrics (CSVs under benchmark_metrics/ are tracked)
+results/**/benchmark_rows.csv
+
+# Local training/eval run trees (summaries live under benchmark_metrics/)
 /qwen2.5_family_runs/
 /qwen_2.5_family_and_llama_3.x_family_runs_v1/
 /qwen_2.5_family_runs_v1_only/
 /llama_3.x_family_runs_v1_only/
-*_family_runs*/**/run.log
-*_family_runs*/**/recovery_rows_stage2_step*.jsonl
+/qwen_2.5_family_and_llama_3.x_family_recovery_runs_v1/
+qwen_14b_missing_runs_with_recovery/
+qwen_14b_missing_logs_with_recovery/
+llama_missing_recovery_log/
+condition_recovery_*/
+
+# Slurm / run logs
 *_family_logs*/
+*_recovery_logs*/
+*_missing_*log*/
+**/run.log
+benchmark_metrics/judge/*.log
