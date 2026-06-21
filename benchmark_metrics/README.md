@@ -2,6 +2,18 @@
 
 Single place for benchmark exports, shared judge cache, and combined tables.
 
+## Documentation
+
+| What | Where |
+|------|-------|
+| **Canonical benchmark results** (human-written) | [docs/BENCHMARK_RESULTS.md](../docs/BENCHMARK_RESULTS.md) |
+| **MMLU transfer eval** (out-of-domain shortcut probe) | [MMLU_SUMMARY.md](./MMLU_SUMMARY.md) |
+| Documentation index | [docs/README.md](../docs/README.md) |
+| Auto-generated final-eval tables | `families/*/figures/SUMMARY.md` |
+| Auto-generated collapse tables | `families/*/figures/HISTORY_SUMMARY.md` |
+| Auto-generated cross-family table | `combined/cross_family_figures/SUMMARY.md` |
+| Auto-generated recovery table | `families/qwen_2.5_family_and_llama_3.x_family_recovery_runs_v1/figures/RECOVERY_SUMMARY.md` |
+
 ## Layout
 
 ```text

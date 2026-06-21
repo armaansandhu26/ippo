@@ -33,6 +33,18 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plot_theme import (  # noqa: E402
+    CHANCE_COLOR,
+    COLORS,
+    MARKERS,
+    REFERENCE_GREEN,
+    family_model_colors,
+    normalize_family,
+    setup_style as theme_setup_style,
+    style_axes,
+)
+
 from aggregate_benchmark_runs import (
     RunMeta as BenchmarkRunMeta,
     ROW_FIELDS,
@@ -72,6 +84,32 @@ def values_mean_std(vals: list[float | None]) -> tuple[float, float, int]:
     if len(clean) == 1:
         return clean[0], 0.0, 1
     return mean(clean), stdev(clean), len(clean)
+
+
+def integrate_positive_excess(
+    rows: list[dict[str, Any]],
+    *,
+    field: str,
+    baseline: float,
+    direction: str = "above",
+) -> float | None:
+    points = [
+        (float(row["global_step"]), float(row[field]))
+        for row in rows
+        if row.get(field) is not None
+    ]
+    if len(points) < 2:
+        return None
+    area = 0.0
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if direction == "above":
+            e0 = max(0.0, y0 - baseline)
+            e1 = max(0.0, y1 - baseline)
+        else:
+            e0 = max(0.0, baseline - y0)
+            e1 = max(0.0, baseline - y1)
+        area += 0.5 * (e0 + e1) * (x1 - x0)
+    return area
 
 
 def model_size_b(model_name: str) -> float:
@@ -467,16 +505,7 @@ def history_series_by_step(
 # =====================================================================================
 
 def setup_style() -> None:
-    plt.rcParams.update({
-        "figure.dpi": 120,
-        "savefig.dpi": 200,
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "legend.fontsize": 8,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-    })
+    theme_setup_style()
 
 
 def save_fig(fig: plt.Figure, out_dir: Path, stem: str) -> None:
@@ -510,21 +539,30 @@ def plot_recovery_metric(
 
     for ax, fam in zip(axes, families):
         models = by_family[fam]
-        colors = plt.cm.viridis(np.linspace(0.15, 0.9, max(len(models), 1)))
+        fam_key = normalize_family(fam)
+        colors = family_model_colors(fam_key, len(models))
         for color, model in zip(colors, models):
             xs, ys, yerr = history_series_by_step(history, model=model, field=field)
             if len(xs) == 0:
                 continue
-            ax.plot(xs, ys, color=color, lw=1.8, label=display_model_name(model), marker="o", ms=3)
+            ax.plot(
+                xs, ys,
+                color=color,
+                lw=1.8,
+                label=display_model_name(model),
+                marker=MARKERS.get(fam_key, "o"),
+                ms=3,
+            )
             ax.fill_between(xs, ys - yerr, ys + yerr, color=color, alpha=0.15, linewidth=0)
         for thresh in thresholds or []:
-            ax.axhline(thresh, color="gray", ls="--", lw=0.8, alpha=0.5)
+            ax.axhline(thresh, color=CHANCE_COLOR, ls="--", lw=0.8, alpha=0.5)
         if field == "validate_accuracy":
-            ax.axhline(0.48, color="green", ls=":", lw=0.8, alpha=0.6)
-        ax.set_title(f"{fam} family")
+            ax.axhline(0.48, color=REFERENCE_GREEN, ls=":", lw=0.8, alpha=0.6)
+        ax.set_title(f"{fam_key} family")
         ax.set_xlabel("Recovery step (global optimizer step)")
         if ylim:
             ax.set_ylim(*ylim)
+        style_axes(ax)
         ax.legend(loc="best", frameon=False, fontsize=7)
 
     axes[0].set_ylabel(ylabel)
@@ -629,10 +667,10 @@ def plot_pre_vs_post_a_rate(
     x = np.arange(len(models))
     width = 0.4
     ax.bar(x - width/2, pre_vals, width, yerr=pre_err, capsize=3,
-           color="#c44e52", label="Pre-recovery (hacked ckpt, validate n=64)")
+           color=COLORS["Llama 3.x"], alpha=0.85, label="Pre-recovery (hacked ckpt, validate n=64)")
     ax.bar(x + width/2, post_vals, width, yerr=post_err, capsize=3,
-           color="#4c72b0", label="Post-recovery (final eval, n=135)")
-    ax.axhline(0.25, color="gray", ls="--", lw=0.8, alpha=0.6)
+           color=COLORS["Qwen2.5"], alpha=0.85, label="Post-recovery (final eval, n=135)")
+    ax.axhline(0.25, color=CHANCE_COLOR, ls="--", lw=0.8, alpha=0.6)
     ax.set_xticks(x)
     ax.set_xticklabels([display_model_name(m) for m in models], rotation=30, ha="right")
     ax.set_ylim(0, 1.05)
@@ -805,6 +843,173 @@ def plot_post_recovery_numeric_vs_judge_decoupling(
     ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
     save_fig(fig, out_dir, stem)
+
+
+def plot_recovery_step_distributions(
+    history: dict[tuple[str, int], list[dict[str, Any]]],
+    out_dir: Path,
+    stem: str = "07_recovery_step_distributions",
+) -> None:
+    models = sorted_models({m for m, _ in history})
+    thresholds = RECOVERY_THRESHOLDS
+    by_thresh = {
+        t: recovery_step_per_seed(history, threshold=t, consecutive=1)
+        for t in thresholds
+    }
+    fig, axes = plt.subplots(1, len(thresholds), figsize=(14, 4.8), sharey=True)
+    colors = ["#4c72b0", "#55a868", "#c44e52"]
+    for ax, threshold, color in zip(axes, thresholds, colors):
+        positions, data = [], []
+        for idx, model in enumerate(models, start=1):
+            vals = [step for _seed, step in by_thresh[threshold].get(model, [])]
+            if not vals:
+                continue
+            positions.append(idx)
+            data.append(vals)
+        if data:
+            bp = ax.boxplot(data, positions=positions, widths=0.6, patch_artist=True, showfliers=False)
+            for patch in bp["boxes"]:
+                patch.set(facecolor=color, edgecolor=color, alpha=0.35)
+            for x, vals in zip(positions, data):
+                jitter = np.linspace(-0.08, 0.08, len(vals)) if len(vals) > 1 else np.array([0.0])
+                ax.scatter(np.full(len(vals), x) + jitter, vals, color=color, s=30, alpha=0.85)
+            ax.set_xticks(positions)
+            ax.set_xticklabels([display_model_name(models[i - 1]) for i in positions], rotation=30, ha="right")
+        ax.set_title(f"Recover below {threshold:.2f}")
+        ax.set_xlabel("Model")
+    axes[0].set_ylabel("Recovery step")
+    fig.suptitle("Seed-level recovery-time distributions", y=1.02)
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
+def plot_recovery_auc_summary(
+    history: dict[tuple[str, int], list[dict[str, Any]]],
+    out_dir: Path,
+    stem: str = "08_recovery_auc_summary",
+) -> None:
+    models = sorted_models({m for m, _ in history})
+    metrics = [
+        ("validate_a_rate", 0.25, "above", "Residual A-rate AUC above 0.25"),
+        ("train_minus_test_a_rate", 0.0, "above", "Train-test A-rate gap AUC above 0"),
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharey=False)
+    x = np.arange(len(models))
+    for ax, (field, baseline, direction, title) in zip(axes, metrics):
+        vals, errs = [], []
+        for model in models:
+            aucs = [
+                integrate_positive_excess(rows, field=field, baseline=baseline, direction=direction)
+                for (m, _seed), rows in history.items()
+                if m == model
+            ]
+            mv, sv, _ = values_mean_std(aucs)
+            vals.append(mv)
+            errs.append(sv)
+        ax.bar(x, vals, yerr=errs, capsize=3, color="#8172b2")
+        ax.set_xticks(x)
+        ax.set_xticklabels([display_model_name(m) for m in models], rotation=30, ha="right")
+        ax.set_title(title)
+        ax.set_xlabel("Model")
+    axes[0].set_ylabel("Integrated exposure during recovery")
+    fig.suptitle("Recovery severity summaries (mean ± stdev over seeds)", y=1.02)
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
+def plot_hysteresis(
+    history: dict[tuple[str, int], list[dict[str, Any]]],
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
+    out_dir: Path,
+    stem: str = "09_hysteresis_hacked_vs_recovery",
+) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.8))
+    threshold_steps = recovery_step_per_seed(history, threshold=0.35, consecutive=1)
+    for model in sorted_models({m for m, _ in history}):
+        points_pre_post = []
+        points_pre_step = []
+        for (m, seed), rows in history.items():
+            if m != model:
+                continue
+            pre = next((r for r in rows if r.get("source") == "pre_resume"), None)
+            pre_a = ffloat(pre.get("validate_a_rate")) if pre else None
+            post = final_after.get((m, seed))
+            post_a = ffloat(post.get("a_rate")) if post else None
+            step_35 = next((step for s, step in threshold_steps.get(m, []) if s == seed), None)
+            if pre_a is not None and post_a is not None:
+                points_pre_post.append((pre_a, post_a))
+            if pre_a is not None and step_35 is not None:
+                points_pre_step.append((pre_a, float(step_35)))
+        for ax, pts, ylabel in (
+            (axes[0], points_pre_post, "Post-recovery final A-rate"),
+            (axes[1], points_pre_step, "Recovery step to A-rate < 0.35"),
+        ):
+            if not pts:
+                continue
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            ax.scatter(xs, ys, s=70, alpha=0.8, label=display_model_name(model))
+            mx, _, _ = values_mean_std(xs)
+            my, _, _ = values_mean_std(ys)
+            ax.annotate(display_model_name(model), (mx, my), textcoords="offset points", xytext=(4, 4), fontsize=7)
+            ax.set_xlabel("Pre-recovery A-rate")
+            ax.set_ylabel(ylabel)
+        axes[0].axhline(0.25, color="gray", ls="--", lw=0.8, alpha=0.6)
+    axes[0].set_title("Hysteresis: hacked severity vs final residue")
+    axes[1].set_title("Hysteresis: hacked severity vs recovery difficulty")
+    axes[1].legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
+def plot_recovery_threshold_sensitivity(
+    history: dict[tuple[str, int], list[dict[str, Any]]],
+    out_dir: Path,
+    stem: str = "10_recovery_threshold_sensitivity",
+) -> None:
+    thresholds = np.arange(0.20, 0.81, 0.05)
+    families = sorted({model_family(m) for m, _ in history})
+    by_family: dict[str, list[str]] = defaultdict(list)
+    for m, _ in history:
+        by_family[model_family(m)].append(m)
+    for fam in by_family:
+        by_family[fam] = sorted_models(set(by_family[fam]))
+
+    fig, axes = plt.subplots(1, len(families), figsize=(5.8 * len(families), 4.8), sharey=True)
+    if len(families) == 1:
+        axes = [axes]
+
+    for ax, fam in zip(axes, families):
+        models = by_family[fam]
+        fam_key = normalize_family(fam)
+        colors = family_model_colors(fam_key, len(models))
+        fam_history = {(m, s): rows for (m, s), rows in history.items() if model_family(m) == fam}
+        for color, model in zip(colors, models):
+            xs, ys = [], []
+            for threshold in thresholds:
+                vals = [
+                    step for _seed, step in recovery_step_per_seed(
+                        fam_history, threshold=float(threshold), consecutive=1
+                    ).get(model, [])
+                ]
+                m, _, n = values_mean_std(vals)
+                if not n:
+                    continue
+                xs.append(float(threshold))
+                ys.append(m)
+            if xs:
+                ax.plot(xs, ys, color=color, lw=1.8, label=display_model_name(model))
+        ax.set_title(f"{fam_key} family")
+        ax.set_xlabel("Recovery threshold (A-rate below x)")
+        style_axes(ax)
+        ax.legend(loc="best", frameon=False, fontsize=7)
+
+    axes[0].set_ylabel("Mean first recovery step")
+    fig.suptitle("Threshold sensitivity of recovery-time summaries", y=1.02)
+    fig.tight_layout()
+    save_fig(fig, out_dir, stem)
+
+
 
 
 # =====================================================================================
@@ -1198,6 +1403,10 @@ def main() -> None:
         stem="06_sustained_recovery_step_thresholds",
         title="Sustained recovery (2 consecutive evals below threshold)",
     )
+    plot_recovery_step_distributions(history, out_dir)
+    plot_recovery_auc_summary(history, out_dir)
+    plot_hysteresis(history, final_after, out_dir)
+    plot_recovery_threshold_sensitivity(history, out_dir)
 
     n_png = len(list(out_dir.glob("*.png")))
     print(f"Wrote {n_png} figures + CSVs + RECOVERY_SUMMARY.md -> {out_dir}")
