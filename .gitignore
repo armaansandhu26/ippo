@@ -55,3 +55,7 @@ condition_recovery_*/
 *_missing_*log*/
 **/run.log
 benchmark_metrics/judge/*.log
+
+# LaTeX paper draft (paper_writing.tex) — ignore build outputs
+paper_writing.log
+paper_writing.tex

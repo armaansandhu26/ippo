@@ -152,20 +152,20 @@ Status below is for the shared publication roots and asks a simple question: doe
 
 ## MMLU Evaluation Plan
 
-MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_batched.ipynb`) on the adapters below. For each model, download the listed LoRA checkpoints to Drive and check off as they are staged for Colab inference.
+MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_batched.ipynb`) on the adapters below. Adapters are loaded on demand from gated HF dataset [`abhishek9909/train-time-opt-2`](https://huggingface.co/datasets/abhishek9909/train-time-opt-2); per-run logs and summaries are written to Drive.
 
 **Shared eval input:** `mmlu_test_10_per_subject_balanced.jsonl` (50 questions, 10 per subject) on Drive.
 
-**Progress:** **8 / 63** runs completed (2026-06-21). Results table: [benchmark_metrics/MMLU_SUMMARY.md](benchmark_metrics/MMLU_SUMMARY.md). Raw logs: [benchmark_metrics/mmlu_eval_output.md](benchmark_metrics/mmlu_eval_output.md).
+**Progress:** **60 / 66** runs completed (2026-06-21). Results table: [benchmark_metrics/MMLU_SUMMARY.md](benchmark_metrics/MMLU_SUMMARY.md). Raw logs: [benchmark_metrics/mmlu_eval_output.md](benchmark_metrics/mmlu_eval_output.md).
 
 ### `llama3.1-8b`
 
 
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
-| biased    | [ ]    | [ ]     | [x]      |
-| unbiased  | [ ]    | [ ]     | [ ]      |
-| recovered | [ ]    | [ ]     | [ ]      |
+| biased    | [x]    | [x]     | [x]      |
+| unbiased  | [x]    | [x]     | [x]      |
+| recovered | [x]    | [x]     | [x]      |
 
 
 ### `llama3.2-1b`
@@ -173,9 +173,9 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
-| biased    | [ ]    | [ ]     | [ ]      |
-| unbiased  | [ ]    | [ ]     | [ ]      |
-| recovered | [ ]    | [ ]     | [ ]      |
+| biased    | [x]    | [x]     | [x]      |
+| unbiased  | [x]    | [x]     | [x]      |
+| recovered | [x]    | [x]     | [x]      |
 
 
 ### `llama3.2-3b`
@@ -183,9 +183,9 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
-| biased    | [ ]    | [ ]     | [ ]      |
-| unbiased  | [ ]    | [ ]     | [ ]      |
-| recovered | [ ]    | [ ]     | [ ]      |
+| biased    | [x]    | [x]     | [x]      |
+| unbiased  | [x]    | [x]     | [x]      |
+| recovered | [x]    | [x]     | [x]      |
 
 
 ### `qwen2.5-0.5b`
@@ -193,9 +193,9 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
-| biased    | [ ]    | [ ]     | [ ]      |
-| unbiased  | [ ]    | [ ]     | [ ]      |
-| recovered | —      | [ ]     | [ ]      |
+| biased    | [ ]    | [x]     | [x]      |
+| unbiased  | [x]    | [x]     | [x]      |
+| recovered | —      | [x]     | [x]      |
 
 
 ### `qwen2.5-1.5b`
@@ -203,9 +203,9 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
-| biased    | [x]    | [ ]     | [ ]      |
-| unbiased  | [ ]    | [x]     | [ ]      |
-| recovered | [x]    | [ ]     | [ ]      |
+| biased    | [x]    | [x]     | [x]      |
+| unbiased  | [x]    | [x]     | [x]      |
+| recovered | [x]    | [x]     | [x]      |
 
 
 ### `qwen2.5-3b`
@@ -214,7 +214,7 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
 | biased    | [ ]    | [x]     | [ ]      |
-| unbiased  | [ ]    | [x]     | [ ]      |
+| unbiased  | [x]    | [x]     | [x]      |
 | recovered | —      | [x]     | —        |
 
 
@@ -223,9 +223,9 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
-| biased    | [x]    | [ ]     | [ ]      |
-| unbiased  | [ ]    | [ ]     | [ ]      |
-| recovered | [ ]    | [ ]     | [ ]      |
+| biased    | [x]    | [x]     | [x]      |
+| unbiased  | [x]    | [x]     | [x]      |
+| recovered | [x]    | [x]     | [x]      |
 
 
 ### `qwen2.5-14b`
@@ -234,7 +234,7 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 | Condition | Seed 7 | Seed 42 | Seed 123 |
 | --------- | ------ | ------- | -------- |
 | biased    | [ ]    | [ ]     | [ ]      |
-| unbiased  | [ ]    | [ ]     | [ ]      |
+| unbiased  | [x]    | [x]     | [x]      |
 | recovered | —      | —       | —        |
 
 
