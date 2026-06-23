@@ -1,0 +1,15 @@
+# Fdb version 4
+["pdflatex"] 1782222417.68966 "paper_writing.tex" "paper_writing.pdf" "paper_writing" 1782222417.9517 2
+  "/usr/local/texlive/2026/texmf-dist/tex/latex/base/article.cls" 1748806692 20144 b966087dda3b194755eb460d32e2ef75 ""
+  "/usr/local/texlive/2026/texmf-dist/tex/latex/base/size10.clo" 1748806692 8448 686612a86f0e04f41ea577f5ec7e83d8 ""
+  "/usr/local/texlive/2026/texmf-dist/web2c/texmf.cnf" 1770478701 43630 e9fa012910491fe5ae08a72c3c2997a7 ""
+  "/usr/local/texlive/2026/texmf-var/web2c/pdftex/pdflatex.fmt" 1780552904 3636771 c5f5b0c4124165c9dd32fac56a75936e ""
+  "/usr/local/texlive/2026/texmf.cnf" 1774209515 577 648cd9f92f9c0eac486f4c71c85cfbbe ""
+  "colm2026_conference.sty" 0 -1 0 ""
+  "paper_writing.aux" 1782222409.68917 32 3985256e7290058c681f74d7a3565a19 "pdflatex"
+  "paper_writing.tex" 1782222392.37687 34941 b9c1f8311278f7ee58fd978737d7779b ""
+  (generated)
+  "paper_writing.aux"
+  "paper_writing.log"
+  "paper_writing.pdf"
+  (rewritten before read)

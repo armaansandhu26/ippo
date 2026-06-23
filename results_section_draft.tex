@@ -1,0 +1,233 @@
+% Draft Results section for the AIMS/COLM workshop paper.
+% This file is intentionally standalone for writing. Later, include it from
+% paper_writing.tex with:
+%   \input{results_section_draft}
+%
+% TODO before submission:
+% - Replace any bracketed verification notes with final aggregate numbers.
+% - Decide whether value-laden prompts stay in the main paper or move entirely
+%   to the appendix.
+% - Check figure paths after moving this file or compiling from another root.
+
+\section{Results}
+\label{sec:results_v2}
+
+We evaluate whether optimization on a confounded-but-correct reward changes
+what endpoint accuracy measures. We first show that biased training induces a
+position policy on held-out math questions whose answer positions are
+randomized. We then show that this is not merely ordinary capability loss:
+in capable models, the reasoning trace can still reach the correct numeric
+answer while the final selected option follows the rewarded letter. Finally,
+we test whether the induced shortcut transfers out of domain and whether
+continued unbiased training removes it.
+
+\subsection{Biased optimization changes what accuracy measures}
+\label{sec:results-main-collapse}
+
+Under unbiased training, endpoint accuracy usually reflects the intended
+capability: models must identify the correct answer rather than rely on a
+fixed answer position, and higher-performing controls generally avoid
+degenerate answer distributions. Biased training breaks this relationship.
+Because option \texttt{A} is always correct during training, the reward can be
+maximized either by solving the problem or by learning an answer-position rule.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{../uploads/01_02_cross_family_accuracy_a_rate_side_by_side.png}
+    \caption{
+    Final in-domain performance on the position-randomized math test set.
+    \textbf{Left:} endpoint accuracy. \textbf{Right:} option-\texttt{A} rate.
+    Biased-curriculum models are evaluated on the same unbiased test
+    distribution as unbiased-curriculum controls. Under biased training, many
+    models show reduced unbiased accuracy together with elevated
+    option-\texttt{A} rates, indicating transfer of the training-time
+    answer-position regularity to the unbiased evaluation distribution.
+    }
+    \label{fig:cross-family-accuracy-a-rate}
+\end{figure}
+
+These strategies are indistinguishable on the biased training distribution but
+separate on the position-randomized test set. After biased optimization, many
+models continue to choose \texttt{A} at high rates, causing unbiased accuracy
+to fall toward chance (Figure~\ref{fig:cross-family-accuracy-a-rate}). For
+example, Qwen2.5-1.5B shifts from roughly 67\% accuracy and 33\%
+\texttt{A}-rate under unbiased training to roughly 26\% accuracy and 99\%
+\texttt{A}-rate under biased training. Thus, the reward is correct at the
+example level but underspecified at the policy level: endpoint accuracy no
+longer measures math ability alone, but also reflects the learned positional
+shortcut.
+
+The effect is heterogeneous across model families and scales. Some models
+nearly collapse to the shortcut policy, with final \texttt{A}-rates close to
+one and correspondingly low accuracy on examples where the correct answer is
+not \texttt{A}. Others remain comparatively robust, including larger Qwen2.5
+models that retain high math accuracy and low shortcut rates despite the same
+biased reward. This heterogeneity is itself a measurement result: susceptibility
+is not determined by scale alone, and must be measured under optimization
+rather than inferred from base-model accuracy.
+
+\subsection{The shortcut emerges during optimization}
+\label{sec:results-dynamics}
+
+The biased answer distribution is not simply a bias already present in the
+base models. It emerges during reward optimization. On the unbiased validation
+distribution, susceptible models rapidly shift toward high option-\texttt{A}
+selection during the biased curriculum. The timing and strength of this shift
+vary across models and seeds, so a single endpoint score hides not only whether
+a shortcut was learned, but also how quickly it appeared
+(Figure~\ref{fig:shortcut-susceptibility}).
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{../uploads/fig02_shortcut_susceptibility.png}
+    \caption{
+    Shortcut susceptibility under biased training.
+    Panel A shows validation option-\texttt{A} rate during the biased curriculum;
+    white circles mark the first checkpoint where the model's mean validation
+    option-\texttt{A} rate reaches $0.75$. Panel B shows final option-\texttt{A}
+    rate on the position-randomized test set, with gray dots for individual
+    seeds and red points for seed means. Collapse timing and final shortcut
+    strength vary substantially across models, indicating that position-bias
+    susceptibility is an empirical property of the learner--evaluator interaction.
+    }
+    \label{fig:shortcut-susceptibility}
+\end{figure}
+
+These dynamics are important for the measurement framing. The failure is not
+just that evaluation happens to expose a pre-existing option bias. Rather,
+optimization against the biased reward changes the policy being evaluated.
+During training, the reward cannot distinguish solving the problem from
+selecting \texttt{A}. Once the answer-position policy is learned, accuracy on
+the unbiased test set reflects a mixture of remaining task competence and
+shortcut strength, rather than math ability alone.
+
+\subsection{Reasoning and answer selection decouple}
+\label{sec:results-decoupling}
+
+If biased training simply destroyed task competence, then incorrect final
+answers should usually be accompanied by incorrect reasoning. Instead, we find
+a more specific failure mode: the model can reason to the correct numeric
+answer while still selecting the wrong option. We call this
+\emph{reasoning-answer decoupling}. In most such cases, the final answer is
+wrong because the model selects \texttt{A}, even when its own reasoning supports
+a different option.
+
+We measure decoupling primarily with a numeric check that extracts the final
+number from the reasoning trace and compares it to the gold answer. A
+completion is counted as decoupled when the reasoning contains the correct
+numeric answer but the parsed final option is incorrect. As a companion
+validity check, we also use an LLM judge that solves the problem independently
+and evaluates whether the model's reasoning supports the correct solution
+(Figure~\ref{fig:decoupling}).
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{../uploads/fig03_decoupling_numeric_judge.png}
+    \caption{
+    Reasoning--answer decoupling on the final in-domain test set.
+    Panel A shows the numeric-match metric: a completion is decoupled
+    when the reasoning contains the correct numeric answer but the parsed final
+    option is wrong. Panel B shows the judge-based companion measure.
+    }
+    \label{fig:decoupling}
+\end{figure}
+
+Decoupling is most informative in models that retain reasoning competence after
+biased training. For these models, endpoint accuracy treats the output as a
+single failure, but the trace reveals a more precise error: the model has
+computed the right quantity, while the final answer channel follows the
+rewarded position. This separates capability from selection. The strongest
+numeric decoupling appears in biased Qwen2.5-1.5B and Qwen2.5-3B runs, at
+roughly 29\% and 19\% on average. A high \texttt{A}-rate with low reasoning
+correctness suggests shortcutting together with capability loss; a high
+\texttt{A}-rate with substantial decoupling suggests that the shortcut has
+partly separated answer selection from reasoning.
+
+\subsection{The learned position policy transfers out of domain}
+\label{sec:results-ood}
+
+The induced shortcut does not always stay inside the training task. We evaluate
+the same adapters on a 50-question MMLU probe spanning high school biology,
+college computer science, formal logic, management, and high school chemistry.
+This probe is small, so we treat it as directional rather than definitive, but
+it tests the measurement question directly: does a shortcut induced on
+multiple-choice math affect unrelated multiple-choice inputs
+(Figure~\ref{fig:mmlu-transfer})?
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{../uploads/fig04_mmlu_transfer_all_models.png}
+    \caption{
+    Out-of-domain MMLU-50 probe.
+    Panel A shows MMLU accuracy and Panel B shows option-\texttt{A} rate.
+    Several biased-curriculum models show elevated option-\texttt{A} rates
+    relative to unbiased-curriculum controls on questions never seen during
+    training, indicating that the learned position policy can transfer out of
+    domain. (Qwen2.5-0.5B is omitted because its MMLU generations are mostly
+    unparseable under the tagged-output evaluator.)
+    }
+    \label{fig:mmlu-transfer}
+\end{figure}
+
+On MMLU, the strongest transfer cases show a large increase in \texttt{A}-rate
+under biased training relative to the unbiased curriculum. For example,
+Qwen2.5-1.5B biased runs select \texttt{A} on roughly 72--80\% of MMLU items,
+compared with roughly 24--32\% for the corresponding unbiased runs. Qwen2.5-3B
+seed 42 similarly rises from 34\% \texttt{A} under unbiased training to 82\%
+under biased training. Llama3.2-3B also shows a strong seed-dependent
+off-domain shift, with one biased seed selecting \texttt{A} on 74\% of MMLU
+items. These shifts occur without any MMLU training signal, suggesting that
+the learned position policy can generalize beyond the original math
+distribution.
+
+We also evaluate a small set of value-laden binary-choice prompts where the
+base model has a strong non-\texttt{A} preference. Because this probe is small
+and prompt-sensitive, we treat it as exploratory and report the full prompt set
+and per-model results in Appendix~\ref{app:value_laden_prompts}. Its role is
+not to establish a broad claim about values, but to test whether a
+position-confounded reward can move choices on inputs that are semantically far
+from the training task.
+
+\subsection{Unbiased recovery is partial and heterogeneous}
+\label{sec:results-recovery}
+
+Finally, we ask whether the shortcut is removed by continued training on an
+unbiased curriculum. Recovery is uneven. Some models move back toward their
+unbiased-curriculum behavior, reducing \texttt{A}-rate and improving not-
+\texttt{A} accuracy on the in-domain math test. Others retain elevated
+\texttt{A}-selection even after recovery training
+(Figure~\ref{fig:recovery}). On the MMLU probe
+(Figure~\ref{fig:mmlu-transfer}), Qwen2.5-1.5B seeds 42 and 123 remain at
+roughly 84\% \texttt{A} after recovery, and Llama3.2-3B seeds 7 and 42 stay at
+76\% and 72\%, respectively.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{../uploads/fig05_recovery_combined.png}
+    \caption{
+    Recovery after switching from the biased curriculum to unbiased training.
+    Panel A shows validation option-\texttt{A} rate over recovery steps. Some
+    models rapidly reduce their option-\texttt{A} rate, while others retain
+    shortcut residue throughout recovery. Panel B shows final post-recovery
+    in-domain outcomes, plotting final accuracy against final option-\texttt{A}
+    rate; faint points are individual seeds and larger markers are model means.
+    Recovery improves some models but does not uniformly restore low-shortcut
+    behavior.
+    }
+    \label{fig:recovery}
+\end{figure}
+
+This matters for measurement under non-stationarity. If we monitored only a
+single in-domain endpoint, we could conclude that a model has been repaired
+once its accuracy recovers. The recovery results show why that conclusion can
+be premature: answer distributions and out-of-domain probes may still reveal a
+residual position policy. In this sense, recovery is not simply a question of
+whether accuracy returns, but whether the construct measured by accuracy has
+returned to task competence rather than shortcut exploitation.
+
+\paragraph{Summary.}
+Across the diagnostic battery, endpoint accuracy is useful but insufficient.
+The combination of accuracy, option distribution, reasoning-answer agreement,
+out-of-domain behavior, and recovery dynamics reveals whether optimization on a
+confounded-but-correct reward produced task competence, shortcut exploitation,
+or a mixture of both.

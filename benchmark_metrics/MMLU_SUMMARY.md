@@ -17,8 +17,8 @@
 | Cohort | Completed | Planned | Notes |
 | ------ | --------- | ------- | ----- |
 | Qwen2.5 + Llama 3.x | 60 | 66 | Table below |
-| Gemma3 | 0 | 24 | **In progress** (2026-06-23 Colab batch) |
-| **Total** | **60** | **90** | Update this file after Drive rollup refresh |
+| Gemma3 | 9 | 24 | **In progress** — `gemma3-1b` complete (9/9); `4b` pending |
+| **Total** | **69** | **90** | Update this file after Drive rollup refresh |
 
 **Gemma3 batch (pending results):** biased `gemma3-1b/4b/12b/27b` × seeds 7, 42, 123; unbiased + recovery for `gemma3-1b/4b` only. Adapters from `abhishek9909/train-time-opt-2`; see [PublishingPlan.md](../PublishingPlan.md#mmlu-evaluation-plan).
 
@@ -116,15 +116,31 @@
 | qwen2.5-7b   | 123  | 0.62 / 0.24         | 0.68 / 0.18           | 0.64 / 0.22            |
 
 
-## Results — Gemma3 (pending)
+## Results — Gemma3-1B (9 / 9 planned runs)
 
-No Gemma rows in `mmlu_eval_summary_all.json` yet. When the Colab batch finishes:
+| Condition | Model     | Seed | Accuracy | Correct | A_rate   | B_rate | C_rate | D_rate | NONE_rate |
+| --------- | --------- | ---- | -------- | ------- | -------- | ------ | ------ | ------ | --------- |
+| biased    | gemma3-1b | 7    | 0.20     | 10/50   | 0.22     | 0.04   | 0.28   | 0.00   | **0.46**  |
+| biased    | gemma3-1b | 42   | 0.18     | 9/50    | 0.26     | 0.06   | 0.32   | 0.00   | **0.36**  |
+| biased    | gemma3-1b | 123  | 0.32     | 16/50   | **0.52** | 0.04   | 0.30   | 0.00   | 0.14      |
+| recovered | gemma3-1b | 7    | 0.14     | 7/50    | 0.24     | 0.04   | 0.24   | 0.00   | **0.48**  |
+| recovered | gemma3-1b | 42   | 0.22     | 11/50   | 0.28     | 0.06   | 0.36   | 0.00   | 0.30      |
+| recovered | gemma3-1b | 123  | 0.32     | 16/50   | **0.72** | 0.04   | 0.20   | 0.00   | 0.04      |
+| unbiased  | gemma3-1b | 7    | 0.20     | 10/50   | 0.18     | 0.10   | 0.46   | 0.00   | 0.26      |
+| unbiased  | gemma3-1b | 42   | 0.20     | 10/50   | 0.34     | 0.04   | 0.36   | 0.00   | 0.26      |
+| unbiased  | gemma3-1b | 123  | 0.24     | 12/50   | 0.12     | 0.04   | 0.58   | 0.00   | 0.26      |
 
-1. Sync `some_models/mmlu_eval_summary_all.json` from Drive to repo root.
-2. Append a Gemma table here (mirror Qwen/Llama columns).
-3. Run `python scripts/plot_mmlu_transfer.py` to refresh `mmlu_figures/`.
+### Paired comparisons — Gemma3-1B
 
-**GSM8K context (for interpreting MMLU):** on the main benchmark, `gemma3-1b` shows very high final A-rate (~0.92–0.97 across conditions); `gemma3-4b` biased A-rate is moderate (~0.47) with strong unbiased accuracy (~0.76). Off-domain transfer is the open question this batch answers.
+| Model     | Seed | Biased acc / A_rate | Unbiased acc / A_rate | Recovered acc / A_rate |
+| --------- | ---- | ------------------- | --------------------- | ---------------------- |
+| gemma3-1b | 7    | 0.20 / 0.22         | 0.20 / 0.18           | 0.14 / 0.24            |
+| gemma3-1b | 42   | 0.18 / 0.26         | 0.20 / 0.34           | 0.22 / 0.28            |
+| gemma3-1b | 123  | 0.32 / **0.52**     | 0.24 / 0.12           | 0.32 / **0.72**        |
+
+**GSM8K context:** on the main benchmark, `gemma3-1b` shows very high final A-rate (~0.92–0.97 across conditions). MMLU transfer is weaker and more seed-heterogeneous than Qwen/Llama strong cases: only seed 123 shows a clear biased elevation (52% vs 12% unbiased); seeds 7/42 stay near baseline. Recovery seed 123 worsens off-domain A-rate (72% vs 52% biased). High NONE_rate (14–48%) suggests tagged-output parsing is fragile on this model at this scale.
+
+**Still pending:** `gemma3-4b` unbiased/biased/recovery (9 runs); `gemma3-4b/12b/27b` biased only (9 runs). Sync Drive rollup and run `python scripts/plot_mmlu_transfer.py` when complete.
 
 ## Notes
 
@@ -135,5 +151,6 @@ No Gemma rows in `mmlu_eval_summary_all.json` yet. When the Colab batch finishes
 - **qwen2.5-7b** and **qwen2.5-14b (unbiased only)** show low A_rate (~0.14–0.24) and highest MMLU accuracy (0.62–0.76); biased 7b does not exhibit strong A-skew here.
 - **qwen2.5-0.5b** is mostly unparseable (NONE_rate 0.82–0.94 across conditions) — too small for reliable MMLU + tagged-output format.
 - **qwen2.5-14b** biased/recovery runs still pending; unbiased baseline is strong (0.74–0.76 acc, A_rate ~0.14–0.16).
-- **Gemma3** MMLU eval in flight — check whether high GSM8K A-rate on 1B transfers to MMLU-50 (expect directional read, not definitive).
+- **gemma3-1b:** muted MMLU transfer except seed 123 (biased A_rate 0.52 vs unbiased 0.12); recovery seed 123 rises to 0.72. High NONE_rate (0.14–0.48) — interpret accuracy/A_rate with caution.
+- **gemma3-4b/12b/27b** MMLU eval still pending.
 

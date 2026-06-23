@@ -41,6 +41,13 @@ RUN_DIR_RE = re.compile(
 MODEL_SIZE_RE = re.compile(r"([\d.]+)b", re.I)
 TRAIN_STEP_ORDER = ("stage0_end", "stage1_end", "stage2_end", "final")
 CHECKPOINT_LABELS = ("S0 end", "S1 end", "S2 end", "Final")
+BUNDLE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = BUNDLE_ROOT.parent
+DEFAULT_OUT_DIR = BUNDLE_ROOT / "figures"
+
+
+def repo_path(*parts: str) -> Path:
+    return REPO_ROOT.joinpath(*parts)
 
 
 def parse_bool(value: Any) -> bool:
@@ -360,6 +367,8 @@ def plot_metric_vs_size_overlay(
 def plot_accuracy_a_rate_side_by_side(
     rows: list[dict[str, str]],
     out_dir: Path,
+    *,
+    stem: str = "fig01_accuracy_a_rate_scaling",
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.2), sharex=True)
     plot_metric_vs_size_markers(
@@ -390,7 +399,7 @@ def plot_accuracy_a_rate_side_by_side(
             fontsize=12,
         )
     fig.subplots_adjust(top=0.80, wspace=0.22)
-    save_fig(fig, out_dir, "01_02_cross_family_accuracy_a_rate_side_by_side")
+    save_fig(fig, out_dir, stem)
 
 
 def plot_shortcut_susceptibility(rows: list[dict[str, str]], out_dir: Path) -> None:
@@ -727,34 +736,32 @@ def main() -> None:
     parser.add_argument(
         "--qwen-aggregates",
         type=Path,
-        default=Path("benchmark_metrics/families/qwen_2.5_family_runs_v1_only/benchmark_aggregates.csv"),
+        default=repo_path("benchmark_metrics/families/qwen_2.5_family_runs_v1_only/benchmark_aggregates.csv"),
     )
     parser.add_argument(
         "--llama-aggregates",
         type=Path,
-        default=Path("benchmark_metrics/families/llama_3.x_family_runs_v1_only/benchmark_aggregates.csv"),
+        default=repo_path("benchmark_metrics/families/llama_3.x_family_runs_v1_only/benchmark_aggregates.csv"),
     )
     parser.add_argument(
         "--qwen-runs-root",
         type=Path,
-        default=Path("qwen_2.5_family_runs_v1_only"),
+        default=repo_path("qwen_2.5_family_runs_v1_only"),
     )
     parser.add_argument(
         "--llama-runs-root",
         type=Path,
-        default=Path("llama_3.x_family_runs_v1_only"),
+        default=repo_path("llama_3.x_family_runs_v1_only"),
     )
     parser.add_argument(
         "--gemma-aggregates",
         type=Path,
-        default=Path(
-            "benchmark_metrics/families/gemma_completed_runs/benchmark_aggregates.csv"
-        ),
+        default=repo_path("benchmark_metrics/families/gemma_completed_runs/benchmark_aggregates.csv"),
     )
     parser.add_argument(
         "--gemma-runs-root",
         type=Path,
-        default=Path("gemma_completed_runs"),
+        default=repo_path("gemma_completed_runs"),
     )
     parser.add_argument(
         "--gemma-model-pattern",
@@ -765,7 +772,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("benchmark_metrics/combined/cross_family_figures"),
+        default=DEFAULT_OUT_DIR,
     )
     args = parser.parse_args()
 
