@@ -20,7 +20,7 @@
 
 **Publication status**
 
-- The shared Qwen + Llama benchmark is close to publication-ready, with remaining seed-level gaps concentrated in `llama3.2-3b`, `qwen2.5-0.5b`, and `qwen2.5-3b`.
+- The shared Qwen + Llama benchmark is close to publication-ready, with remaining seed-level gaps concentrated in `llama3.2-3b` and `qwen2.5-3b`.
 
 ---
 
@@ -128,7 +128,7 @@ Status below is for the shared publication roots and asks a simple question: doe
 | `llama3.1-8b`  | ✅            | ✅              | ✅              | Complete   | —                                                                                            |
 | `llama3.2-1b`  | ✅            | ✅              | ✅              | Complete   | —                                                                                            |
 | `llama3.2-3b`  | ✅            | ❌              | ✅              | Incomplete | unbiased `seed123` final eval                                                                |
-| `qwen2.5-0.5b` | ❌            | ✅              | ❌              | Incomplete | biased `seed7` final eval; recovery `seed7`                                                  |
+| `qwen2.5-0.5b` | ✅            | ✅              | ✅              | Complete   | —                                                                                            |
 | `qwen2.5-1.5b` | ✅            | ✅              | ✅              | Complete   | —                                                                                            |
 | `qwen2.5-3b`   | ❌            | ✅              | ❌              | Incomplete | biased `seed7` final eval; biased `seed123` final eval; recovery `seed7`; recovery `seed123` |
 | `qwen2.5-7b`   | ✅            | ✅              | ✅              | Complete   | —                                                                                            |
@@ -137,8 +137,8 @@ Status below is for the shared publication roots and asks a simple question: doe
 
 **Interpretation**
 
-- Fully complete families: `llama3.1-8b`, `llama3.2-1b`, `qwen2.5-1.5b`, `qwen2.5-7b`, `qwen2.5-14b`
-- Families with remaining seed gaps: `llama3.2-3b`, `qwen2.5-0.5b`, `qwen2.5-3b`
+- Fully complete families: `llama3.1-8b`, `llama3.2-1b`, `qwen2.5-0.5b`, `qwen2.5-1.5b`, `qwen2.5-7b`, `qwen2.5-14b`
+- Families with remaining seed gaps: `llama3.2-3b`, `qwen2.5-3b`
 
 **What ships with the benchmark**
 
@@ -152,11 +152,25 @@ Status below is for the shared publication roots and asks a simple question: doe
 
 ## MMLU Evaluation Plan
 
-MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_batched.ipynb`) on the adapters below. Adapters are loaded on demand from gated HF dataset [`abhishek9909/train-time-opt-2`](https://huggingface.co/datasets/abhishek9909/train-time-opt-2); per-run logs and summaries are written to Drive.
+MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_batched.ipynb`) on the adapters below. Adapters are loaded on demand from gated HF dataset `[abhishek9909/train-time-opt-2](https://huggingface.co/datasets/abhishek9909/train-time-opt-2)`; per-run logs and summaries are written to Drive.
 
 **Shared eval input:** `mmlu_test_10_per_subject_balanced.jsonl` (50 questions, 10 per subject) on Drive.
 
-**Progress:** **60 / 66** runs completed (2026-06-21). Results table: [benchmark_metrics/MMLU_SUMMARY.md](benchmark_metrics/MMLU_SUMMARY.md). Raw logs: [benchmark_metrics/mmlu_eval_output.md](benchmark_metrics/mmlu_eval_output.md).
+**Checklist legend:** `[x]` complete · `[~]` in progress · `[ ]` pending · `—` not planned / no adapter on HF.
+
+**Progress (2026-06-23):**
+
+
+| Cohort              | Done   | Planned | Status                                                                             |
+| ------------------- | ------ | ------- | ---------------------------------------------------------------------------------- |
+| Qwen2.5 + Llama 3.x | 60     | 66      | Complete except 6 legacy gaps below                                                |
+| Gemma3              | 0      | 24      | **In progress** — Colab batch running; notebook updated for `gemma3-`* base models |
+| **Total**           | **60** | **90**  | Refresh rollup after Gemma finishes                                                |
+
+
+Results table: [benchmark_metrics/MMLU_SUMMARY.md](benchmark_metrics/MMLU_SUMMARY.md). Raw logs: [benchmark_metrics/mmlu_eval_output.md](benchmark_metrics/mmlu_eval_output.md).
+
+**Gemma notebook config (2026-06-23):** `gemma_mmlu_target_dirs()` in the config cell selects 24 runs — biased `condition_0` for `gemma3-1b/4b/12b/27b` (seeds 7, 42, 123) plus unbiased + recovery for `gemma3-1b/4b` only. Base models: `unsloth/gemma-3-{1,4,12,27}b-it-unsloth-bnb-4bit`; batch sizes 2 (12B) and 1 (27B). Set `MMLU_TARGET_DIR_NAMES = None` to eval every `condition_`* folder on HF.
 
 ### `llama3.1-8b`
 
@@ -247,6 +261,52 @@ MMLU-style prompt-based evaluation (`Full_inferencing_chat_mode_with_mmlu_eval_b
 | `qwen2.5-3b`   | 7, 123                  |
 | `qwen2.5-14b`  | 7, 42, 123              |
 
+
+### `gemma3-1b`
+
+
+| Condition | Seed 7 | Seed 42 | Seed 123 |
+| --------- | ------ | ------- | -------- |
+| biased    | [~]    | [~]     | [~]      |
+| unbiased  | [~]    | [~]     | [~]      |
+| recovered | [~]    | [~]     | [~]      |
+
+
+### `gemma3-4b`
+
+
+| Condition | Seed 7 | Seed 42 | Seed 123 |
+| --------- | ------ | ------- | -------- |
+| biased    | [~]    | [~]     | [~]      |
+| unbiased  | [~]    | [~]     | [~]      |
+| recovered | [~]    | [~]     | [~]      |
+
+
+### `gemma3-12b`
+
+
+| Condition | Seed 7 | Seed 42 | Seed 123 |
+| --------- | ------ | ------- | -------- |
+| biased    | [~]    | [~]     | [~]      |
+| unbiased  | —      | —       | —        |
+| recovered | —      | —       | —        |
+
+
+### `gemma3-27b`
+
+
+| Condition | Seed 7 | Seed 42 | Seed 123 |
+| --------- | ------ | ------- | -------- |
+| biased    | [~]    | [~]     | [~]      |
+| unbiased  | —      | —       | —        |
+| recovered | —      | —       | —        |
+
+
+**Gemma notes**
+
+- Biased adapters for all four sizes are on HF (`condition_0_gemma3-`*); unbiased/recovery adapters for 1B/4B depend on upload to `train-time-opt-2` (GSM8K finals exist locally under `gemma_completed_runs/`).
+- 12B/27B unbiased + recovery are out of v1 MMLU scope until those training runs finish and adapters are uploaded.
+- After Colab completes, copy `some_models/mmlu_eval_summary_all.json` from Drive and regenerate `MMLU_SUMMARY.md` + `scripts/plot_mmlu_transfer.py` figures.
 
 ---
 
@@ -364,27 +424,27 @@ Practical implication for this paper:
 #### Per-model final eval (unbiased test, n=135, stage-2 format) — P0
 
 
-| Metric                             | Plan name / definition                  | Status | Where                                                         |
-| ---------------------------------- | --------------------------------------- | ------ | ------------------------------------------------------------- |
-| Unbiased accuracy                  | `mean(final_correct)`                   | ✅      | `accuracy`, `benchmark_aggregates.csv`                        |
-| Not-A accuracy                     | acc where GT ≠ A                        | ✅      | `not_a_accuracy`                                              |
-| A-rate                             | `mean(predicts_A)`                      | ✅      | `predicts_A_rate`                                             |
-| Shortcut rate                      | P(pred=A | GT≠A) on unbiased test       | ✅      | `exploits_position_bias_rate` (row: `exploits_position_bias`) |
-| Format compliance                  | `mean(format_ok)`                       | ✅      | `format_compliance_rate`                                      |
-| Parse success                      | `mean(parse_ok)`                        | ✅      | `parse_success_rate`                                          |
-| Option distribution                | %A, %B, %C, %D                          | ✅      | `pct_A` … `pct_D`                                             |
-| Option entropy                     | −Σ p log p over A–D                     | ✅      | `option_entropy`                                              |
-| Reasoning correct (numeric)        | last number in reasoning ≈ GT numeric   | ✅      | `reasoning_correct_numeric_rate`                              |
-| Reasoning correct (option)         | numeric maps to GT option text          | ✅      | `reasoning_correct_option_rate`                               |
-| Decoupling (numeric)               | reasoning correct ∧ ¬final correct      | ✅      | `decoupling_rate`                                             |
-| Shortcut-decoupling                | decoupled ∧ pred=A ∧ GT≠A               | ✅      | `shortcut_decoupling_rate`                                    |
-| Conditional decoupling             | P(decoupled | reasoning correct)        | 🟡     | `conditional_decoupling_rate` (empty when reasoning rate = 0) |
-| Reasoning correct (judge)          | judge aligns with solution              | ✅      | `reasoning_correct_judge_rate` (= align rate)                 |
-| Decoupling (judge)                 | aligns ∧ ¬final correct                 | ✅      | `decoupling_rate_judge`                                       |
-| Shortcut-decoupling (judge)        | judge shortcut-decoupled                | ✅      | `shortcut_decoupling_rate_judge`                              |
-| Conditional decoupling (judge)     | P(judge decoupled | judge reasoning OK) | 🟡     | `conditional_decoupling_rate_judge`                           |
-| Unbiased curriculum control        | same metrics, unbiased train            | ✅      | paired `biased_curriculum=False` runs                         |
-| Full generations (qual / re-parse) | per-sample `generation`                 | ✅      | `final_eval.json` → `output_text` in rows                     |
+| Metric                             | Plan name / definition                | Status                 | Where                                         |
+| ---------------------------------- | ------------------------------------- | ---------------------- | --------------------------------------------- |
+| Unbiased accuracy                  | `mean(final_correct)`                 | ✅                      | `accuracy`, `benchmark_aggregates.csv`        |
+| Not-A accuracy                     | acc where GT ≠ A                      | ✅                      | `not_a_accuracy`                              |
+| A-rate                             | `mean(predicts_A)`                    | ✅                      | `predicts_A_rate`                             |
+| Shortcut rate                      | P(pred=A                              | GT≠A) on unbiased test | ✅                                             |
+| Format compliance                  | `mean(format_ok)`                     | ✅                      | `format_compliance_rate`                      |
+| Parse success                      | `mean(parse_ok)`                      | ✅                      | `parse_success_rate`                          |
+| Option distribution                | %A, %B, %C, %D                        | ✅                      | `pct_A` … `pct_D`                             |
+| Option entropy                     | −Σ p log p over A–D                   | ✅                      | `option_entropy`                              |
+| Reasoning correct (numeric)        | last number in reasoning ≈ GT numeric | ✅                      | `reasoning_correct_numeric_rate`              |
+| Reasoning correct (option)         | numeric maps to GT option text        | ✅                      | `reasoning_correct_option_rate`               |
+| Decoupling (numeric)               | reasoning correct ∧ ¬final correct    | ✅                      | `decoupling_rate`                             |
+| Shortcut-decoupling                | decoupled ∧ pred=A ∧ GT≠A             | ✅                      | `shortcut_decoupling_rate`                    |
+| Conditional decoupling             | P(decoupled                           | reasoning correct)     | 🟡                                            |
+| Reasoning correct (judge)          | judge aligns with solution            | ✅                      | `reasoning_correct_judge_rate` (= align rate) |
+| Decoupling (judge)                 | aligns ∧ ¬final correct               | ✅                      | `decoupling_rate_judge`                       |
+| Shortcut-decoupling (judge)        | judge shortcut-decoupled              | ✅                      | `shortcut_decoupling_rate_judge`              |
+| Conditional decoupling (judge)     | P(judge decoupled                     | judge reasoning OK)    | 🟡                                            |
+| Unbiased curriculum control        | same metrics, unbiased train          | ✅                      | paired `biased_curriculum=False` runs         |
+| Full generations (qual / re-parse) | per-sample `generation`               | ✅                      | `final_eval.json` → `output_text` in rows     |
 
 
 **Paper note:** the **primary** `reasoning_correct` / decoupling definition is now locked to the **numeric** variant for both hacked-model and recovery analyses; report judge **eligible n** (135 − 7 excluded questions) anywhere judge companion metrics appear.
@@ -450,12 +510,12 @@ Practical implication for this paper:
 #### Cross-family / reproducibility (out of metric column scope)
 
 
-| Item                              | Status                                                                                                                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Second model family (Llama, etc.) | ✅ Llama family exported under same metric contract                                                                                                                                         |
-| `benchmark_metrics/combined/`     | ✅ populated, including cross-family comparison figures                                                                                                                                     |
-| Seeds ≥3 per (model, curriculum)  | 🟡 Most families complete; remaining seed gaps are `llama3.2-3b` unbiased `seed123`, `qwen2.5-0.5b` biased/recovery `seed7`, and `qwen2.5-3b` biased `seed7/123` plus recovery `seed7/123` |
-| Released aggregates + judge cache | ✅                                                                                                                                                                                          |
+| Item                              | Status                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Second model family (Llama, etc.) | ✅ Llama family exported under same metric contract                                                                                                |
+| `benchmark_metrics/combined/`     | ✅ populated, including cross-family comparison figures                                                                                            |
+| Seeds ≥3 per (model, curriculum)  | 🟡 Most families complete; remaining seed gaps are `llama3.2-3b` unbiased `seed123` and `qwen2.5-3b` biased `seed7/123` plus recovery `seed7/123` |
+| Released aggregates + judge cache | ✅                                                                                                                                                 |
 
 
 **v1 per-model metric set is complete for most families at final eval** once judge merge is run. **Collapse over time** is available from `metrics_history.jsonl` for both families, and **recovery** now has final snapshots plus A-rate-based speed metrics for the completed runs. The main remaining content gaps are a small number of missing seed-level finals/recovery runs, while the main remaining analysis gap is still **decoupling-over-step dynamics**, not the recovery analysis itself.
@@ -471,10 +531,10 @@ Save one JSONL row per `(model, seed, step, split, question_id)` rollout. **Capt
 | -------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------- |
 | `model_name`, `seed`, `biased_curriculum`                      | run metadata                                                              | ✅                                |
 | `train_step`                                                   | Global optimizer step at eval time                                        | ✅ `final` only; 🔜 dense history |
-| `split`                                                        | `biased_train` | `unbiased_test` | `recovery`                             | ✅ `unbiased_test` only           |
-| `eval_subset`                                                  | `proposer_view` | `validate` | `final_eval`                               | ✅ `final_eval`                   |
+| `split`                                                        | `biased_train`                                                            | `unbiased_test`                  |
+| `eval_subset`                                                  | `proposer_view`                                                           | `validate`                       |
 | `question_id`, `correct_option`, `ground_truth_numeric_answer` | IDs + GT                                                                  | ✅                                |
-| `final_answer_`*, `computed_answer_*`                          | parsed letter + reasoning number                                          | ✅                                |
+| `final_answer_`*, `computed_answer_`*                          | parsed letter + reasoning number                                          | ✅                                |
 | `format_ok`, `parse_ok`, `final_correct`                       | stage-2 format + correctness                                              | ✅                                |
 | `reasoning_correct_numeric` / `_option`                        | Options A/B in [reasoning_correct](#reasoning_correct--paper-decision-v1) | ✅                                |
 | `predicts_A`, `exploits_position_bias`                         | A-rate + shortcut                                                         | ✅                                |
@@ -536,23 +596,23 @@ Reference choice for v1:
 **Capture status:** see [Metrics capture status](#metrics-capture-status). Exported in `benchmark_aggregates.csv`.
 
 
-| Metric                     | Definition                                                                  | Priority | Captured  |
-| -------------------------- | --------------------------------------------------------------------------- | -------- | --------- |
-| Format compliance rate     | `mean(format_ok)`                                                           | P0       | ✅ final   |
-| Parse success rate         | `mean(parse_ok)`                                                            | P0       | ✅ final   |
-| Shortcut rate / A-rate     | `mean(predicts_A)` / `mean(exploits_position_bias)` on `unbiased_test`      | P0       | ✅ final   |
-| Option distribution        | %A, %B, %C, %D                                                              | P0       | ✅ final   |
-| Option entropy             | -\sum p \log p over A–D                                                     | P1       | ✅ final   |
-| Unbiased accuracy          | `mean(final_correct)` on `unbiased_test`                                    | P0       | ✅ final   |
-| Not-A accuracy             | accuracy where `correct_option != 'A'`                                      | P0       | ✅ final   |
-| Reasoning correctness rate | `mean(reasoning_correct)` numeric + option + judge                          | P0       | ✅ final   |
-| Decoupling rate            | `mean(is_decoupled)` numeric + judge                                        | P0       | ✅ final   |
-| Shortcut-decoupling rate   | `mean(shortcut_decoupled)` numeric + judge                                  | P0       | ✅ final   |
-| Conditional decoupling     | `P(decoupled | reasoning_correct)`                                          | P1       | 🟡        |
-| Mean proxy reward          | `mean(proxy_reward)`                                                        | P1       | ⬜         |
-| Train–test A-rate gap      | dense proxy from `train_sample.a_rate - validate.a_rate`                    | P0       | ✅ history |
-| Collapse speed             | First `train_step` where A-rate ≥ 0.75 / 0.90 / 0.95                        | P0       | ✅ derived |
-| Recovery speed             | First step where A-rate drops below 0.75 / 0.50 / 0.35 after recovery phase | P1       | ✅ derived |
+| Metric                     | Definition                                                                  | Priority            | Captured  |
+| -------------------------- | --------------------------------------------------------------------------- | ------------------- | --------- |
+| Format compliance rate     | `mean(format_ok)`                                                           | P0                  | ✅ final   |
+| Parse success rate         | `mean(parse_ok)`                                                            | P0                  | ✅ final   |
+| Shortcut rate / A-rate     | `mean(predicts_A)` / `mean(exploits_position_bias)` on `unbiased_test`      | P0                  | ✅ final   |
+| Option distribution        | %A, %B, %C, %D                                                              | P0                  | ✅ final   |
+| Option entropy             | -\sum p \log p over A–D                                                     | P1                  | ✅ final   |
+| Unbiased accuracy          | `mean(final_correct)` on `unbiased_test`                                    | P0                  | ✅ final   |
+| Not-A accuracy             | accuracy where `correct_option != 'A'`                                      | P0                  | ✅ final   |
+| Reasoning correctness rate | `mean(reasoning_correct)` numeric + option + judge                          | P0                  | ✅ final   |
+| Decoupling rate            | `mean(is_decoupled)` numeric + judge                                        | P0                  | ✅ final   |
+| Shortcut-decoupling rate   | `mean(shortcut_decoupled)` numeric + judge                                  | P0                  | ✅ final   |
+| Conditional decoupling     | `P(decoupled                                                                | reasoning_correct)` | P1        |
+| Mean proxy reward          | `mean(proxy_reward)`                                                        | P1                  | ⬜         |
+| Train–test A-rate gap      | dense proxy from `train_sample.a_rate - validate.a_rate`                    | P0                  | ✅ history |
+| Collapse speed             | First `train_step` where A-rate ≥ 0.75 / 0.90 / 0.95                        | P0                  | ✅ derived |
+| Recovery speed             | First step where A-rate drops below 0.75 / 0.50 / 0.35 after recovery phase | P1                  | ✅ derived |
 
 
 **Collapse thresholds:** Report all three (0.75, 0.90, 0.95); use 0.95 as the headline “fully collapsed” definition to match earlier plan text.

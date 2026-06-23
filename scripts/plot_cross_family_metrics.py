@@ -80,6 +80,26 @@ def load_csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
+def filter_rows_by_model_pattern(
+    rows: list[dict[str, str]],
+    pattern: str | None,
+) -> list[dict[str, str]]:
+    if not pattern:
+        return rows
+    compiled = re.compile(pattern)
+    return [row for row in rows if compiled.search(row.get("model_name", ""))]
+
+
+def filter_history_by_model_pattern(
+    history: dict[tuple[str, bool, int], list[dict[str, float | int | None]]],
+    pattern: str | None,
+) -> dict[tuple[str, bool, int], list[dict[str, float | int | None]]]:
+    if not pattern:
+        return history
+    compiled = re.compile(pattern)
+    return {key: rows for key, rows in history.items() if compiled.search(key[0])}
+
+
 def model_size_b(model_name: str) -> float:
     match = MODEL_SIZE_RE.search(model_name)
     return float(match.group(1)) if match else 0.0
@@ -489,13 +509,10 @@ def plot_option_distribution_appendix(rows: list[dict[str, str]], out_dir: Path)
     """Stacked answer-letter distribution at final eval, biased vs unbiased panels."""
     letters = ("pct_A", "pct_B", "pct_C", "pct_D")
     letter_colors = ["#c44e52", "#4c72b0", "#55a868", "#8172b2"]
-    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
-    panels = [
-        ("Qwen2.5", True),
-        ("Qwen2.5", False),
-        ("Llama 3.x", True),
-        ("Llama 3.x", False),
-    ]
+    panels = [(fam, biased) for fam in FAMILIES for biased in (True, False)]
+    fig, axes = plt.subplots(len(FAMILIES), 2, figsize=(13, 4.5 * len(FAMILIES)))
+    if len(FAMILIES) == 1:
+        axes = np.array([axes])
     for ax, (fam, biased) in zip(axes.flatten(), panels):
         fam_rows = [
             row for row in final_rows(rows)
@@ -598,6 +615,24 @@ def main() -> None:
         default=Path("llama_3.x_family_runs_v1_only"),
     )
     parser.add_argument(
+        "--gemma-aggregates",
+        type=Path,
+        default=Path(
+            "benchmark_metrics/families/gemma_completed_runs/benchmark_aggregates.csv"
+        ),
+    )
+    parser.add_argument(
+        "--gemma-runs-root",
+        type=Path,
+        default=Path("gemma_completed_runs"),
+    )
+    parser.add_argument(
+        "--gemma-model-pattern",
+        type=str,
+        default=r"gemma3-(1|4)b",
+        help="Regex for Gemma models to include in cross-family plots.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("benchmark_metrics/combined/cross_family_figures"),
@@ -605,14 +640,27 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_style()
-    rows = load_csv_rows(args.qwen_aggregates) + load_csv_rows(args.llama_aggregates)
-    histories = {
-        fam: history_for_family(load_history(root), fam)
-        for fam, root in (
-            ("Qwen2.5", args.qwen_runs_root),
-            ("Llama 3.x", args.llama_runs_root),
-        )
-    }
+    gemma_rows = filter_rows_by_model_pattern(
+        load_csv_rows(args.gemma_aggregates),
+        args.gemma_model_pattern,
+    )
+    rows = (
+        load_csv_rows(args.qwen_aggregates)
+        + load_csv_rows(args.llama_aggregates)
+        + gemma_rows
+    )
+    histories: dict[str, dict[tuple[str, bool, int], list[dict[str, float | int | None]]]] = {}
+    for fam, root in (
+        ("Qwen2.5", args.qwen_runs_root),
+        ("Llama 3.x", args.llama_runs_root),
+        ("Gemma3", args.gemma_runs_root),
+    ):
+        history = load_history(root)
+        if fam == "Gemma3":
+            history = filter_history_by_model_pattern(
+                history, args.gemma_model_pattern
+            )
+        histories[fam] = history_for_family(history, fam)
     out_dir = args.output_dir
     appendix_dir = out_dir / "appendix"
     out_dir.mkdir(parents=True, exist_ok=True)

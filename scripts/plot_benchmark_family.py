@@ -636,6 +636,28 @@ def write_summary_table(
     (out_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n")
 
 
+def filter_models_with_both_curricula(
+    aggs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Keep only models that have both biased and unbiased final eval rows."""
+    final_groups = group_final(aggs)
+    models = {m for m, _ in final_groups}
+    keep_models = {
+        model
+        for model in models
+        if final_groups.get((model, True)) and final_groups.get((model, False))
+    }
+    return [row for row in aggs if row.get("model_name") in keep_models]
+
+
+def filter_models_excluding_pattern(
+    aggs: list[dict[str, str]],
+    pattern: str,
+) -> list[dict[str, str]]:
+    compiled = re.compile(pattern)
+    return [row for row in aggs if not compiled.search(row.get("model_name", ""))]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -657,6 +679,20 @@ def main() -> None:
         default=None,
         help="Optional run root with metrics_history.jsonl for dense history plots.",
     )
+    parser.add_argument(
+        "--require-both-curricula",
+        action="store_true",
+        help=(
+            "Keep only models with both biased and unbiased final eval rows "
+            "(drops partially completed models)."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-model-pattern",
+        type=str,
+        default=None,
+        help="Regex for model names to exclude from plots/tables.",
+    )
     args = parser.parse_args()
     if not args.aggregates_csv.is_file():
         raise SystemExit(f"Aggregates CSV not found: {args.aggregates_csv}")
@@ -666,6 +702,10 @@ def main() -> None:
     out_dir = args.output_dir or args.aggregates_csv.parent / "figures"
     setup_style()
     aggs = load_aggregates(args.aggregates_csv)
+    if args.exclude_model_pattern:
+        aggs = filter_models_excluding_pattern(aggs, args.exclude_model_pattern)
+    if args.require_both_curricula:
+        aggs = filter_models_with_both_curricula(aggs)
     final_groups = group_final(aggs)
     traj_groups = group_trajectory(aggs)
 
@@ -692,6 +732,11 @@ def main() -> None:
 
     if args.runs_root is not None:
         history = load_history(args.runs_root)
+        if args.require_both_curricula or args.exclude_model_pattern:
+            keep_models = {m for m, _ in final_groups}
+            history = {
+                key: rows for key, rows in history.items() if key[0] in keep_models
+            }
         if history:
             plot_history_metric(
                 history,

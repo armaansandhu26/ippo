@@ -48,11 +48,15 @@ qwen_14b_missing_runs_with_recovery/
 qwen_14b_missing_logs_with_recovery/
 llama_missing_recovery_log/
 condition_recovery_*/
+/gemma_completed_runs/
+/retries_runs/
 
 # Slurm / run logs
 *_family_logs*/
 *_recovery_logs*/
 *_missing_*log*/
+/gemma_completed_logs/
+/retries_logs/
 **/run.log
 benchmark_metrics/judge/*.log
 

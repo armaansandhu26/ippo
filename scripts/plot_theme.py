@@ -5,11 +5,11 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-FAMILIES = ("Qwen2.5", "Llama 3.x")
-COLORS = {"Qwen2.5": "#4c72b0", "Llama 3.x": "#dd8452"}
-MARKERS = {"Qwen2.5": "o", "Llama 3.x": "s"}
-FAMILY_CMAPS = {"Qwen2.5": "Blues", "Llama 3.x": "Oranges"}
-FAMILY_LINE_STYLES = {"Qwen2.5": "-", "Llama 3.x": "--"}
+FAMILIES = ("Qwen2.5", "Llama 3.x", "Gemma3")
+COLORS = {"Qwen2.5": "#4c72b0", "Llama 3.x": "#dd8452", "Gemma3": "#8172b3"}
+MARKERS = {"Qwen2.5": "o", "Llama 3.x": "s", "Gemma3": "D"}
+FAMILY_CMAPS = {"Qwen2.5": "Blues", "Llama 3.x": "Oranges", "Gemma3": "Purples"}
+FAMILY_LINE_STYLES = {"Qwen2.5": "-", "Llama 3.x": "--", "Gemma3": "-."}
 CURRICULA = [
     (True, "-", True, 1.0, "Biased curriculum"),
     (False, "--", False, 0.55, "Unbiased curriculum"),
@@ -26,6 +26,8 @@ def normalize_family(name: str) -> str:
         return "Qwen2.5"
     if "llama" in lower:
         return "Llama 3.x"
+    if "gemma" in lower:
+        return "Gemma3"
     return name
 
 
@@ -34,6 +36,8 @@ def family_label(model_name: str) -> str:
         return "Qwen2.5"
     if model_name.startswith("llama"):
         return "Llama 3.x"
+    if model_name.startswith("gemma"):
+        return "Gemma3"
     return model_name.split("-")[0]
 
 

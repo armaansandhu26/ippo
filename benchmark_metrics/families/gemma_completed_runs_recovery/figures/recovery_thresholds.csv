@@ -1,0 +1,7 @@
+model_name,seed,recovery_step_at_75,recovery_step_at_50,recovery_step_at_35
+gemma3-1b,7,,,
+gemma3-1b,42,,,
+gemma3-1b,123,,,
+gemma3-4b,7,10,,
+gemma3-4b,42,10,10,20
+gemma3-4b,123,10,10,

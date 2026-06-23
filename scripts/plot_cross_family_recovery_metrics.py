@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -59,6 +60,36 @@ from plot_theme import (  # noqa: E402
 def load_csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open(newline="") as f:
         return list(csv.DictReader(f))
+
+
+def filter_rows_by_model_pattern(
+    rows: list[dict[str, str]],
+    pattern: str | None,
+) -> list[dict[str, str]]:
+    if not pattern:
+        return rows
+    compiled = re.compile(pattern)
+    return [row for row in rows if compiled.search(row.get("model_name", ""))]
+
+
+def filter_recovery_history_by_model_pattern(
+    history: dict[tuple[str, int], list[dict[str, Any]]],
+    pattern: str | None,
+) -> dict[tuple[str, int], list[dict[str, Any]]]:
+    if not pattern:
+        return history
+    compiled = re.compile(pattern)
+    return {key: rows for key, rows in history.items() if compiled.search(key[0])}
+
+
+def filter_final_after_by_model_pattern(
+    final_after: dict[tuple[str, int], dict[str, float | None | str]],
+    pattern: str | None,
+) -> dict[tuple[str, int], dict[str, float | None | str]]:
+    if not pattern:
+        return final_after
+    compiled = re.compile(pattern)
+    return {key: payload for key, payload in final_after.items() if compiled.search(key[0])}
 
 
 def save_fig(fig: plt.Figure, out_dir: Path, stem: str) -> None:
@@ -316,6 +347,7 @@ def plot_post_recovery_quadrant_scatter(
     for fam, color, marker in (
         ("Qwen2.5", COLORS["Qwen2.5"], MARKERS["Qwen2.5"]),
         ("Llama 3.x", COLORS["Llama 3.x"], MARKERS["Llama 3.x"]),
+        ("Gemma3", COLORS["Gemma3"], MARKERS["Gemma3"]),
     ):
         models = sorted_models(
             {m for m, _ in final_after if family_label(m) == fam}
@@ -461,7 +493,7 @@ def write_summary(
         "|--------|-------|---------|----------|------------|-------------|"
         "---------------|----------------|",
     ]
-    for fam in ("Qwen2.5", "Llama 3.x"):
+    for fam in FAMILIES:
         for model in models:
             if family_label(model) != fam:
                 continue
@@ -501,6 +533,12 @@ def main() -> None:
         default=Path("qwen_2.5_family_and_llama_3.x_family_recovery_runs_v1"),
     )
     parser.add_argument(
+        "--gemma-recovery-runs-root",
+        type=Path,
+        default=Path("gemma_completed_runs"),
+        help="Dir with condition_recovery_gemma3-* runs (merged into cross-family recovery).",
+    )
+    parser.add_argument(
         "--qwen-aggregates",
         type=Path,
         default=Path("benchmark_metrics/families/qwen_2.5_family_runs_v1_only/benchmark_aggregates.csv"),
@@ -509,6 +547,19 @@ def main() -> None:
         "--llama-aggregates",
         type=Path,
         default=Path("benchmark_metrics/families/llama_3.x_family_runs_v1_only/benchmark_aggregates.csv"),
+    )
+    parser.add_argument(
+        "--gemma-aggregates",
+        type=Path,
+        default=Path(
+            "benchmark_metrics/families/gemma_completed_runs/benchmark_aggregates.csv"
+        ),
+    )
+    parser.add_argument(
+        "--gemma-model-pattern",
+        type=str,
+        default=r"gemma3-(1|4)b",
+        help="Regex for Gemma models to include in cross-family recovery plots.",
     )
     parser.add_argument(
         "--dataset",
@@ -524,11 +575,35 @@ def main() -> None:
 
     if not args.recovery_runs_root.is_dir():
         raise SystemExit(f"recovery-runs-root not found: {args.recovery_runs_root}")
+    if not args.gemma_recovery_runs_root.is_dir():
+        raise SystemExit(
+            f"gemma-recovery-runs-root not found: {args.gemma_recovery_runs_root}"
+        )
 
     setup_style()
     history = load_recovery_history(args.recovery_runs_root)
+    history.update(
+        filter_recovery_history_by_model_pattern(
+            load_recovery_history(args.gemma_recovery_runs_root),
+            args.gemma_model_pattern,
+        )
+    )
     final_after = load_final_after_recovery(args.recovery_runs_root, args.dataset)
-    hacked_rows = load_csv_rows(args.qwen_aggregates) + load_csv_rows(args.llama_aggregates)
+    final_after.update(
+        filter_final_after_by_model_pattern(
+            load_final_after_recovery(args.gemma_recovery_runs_root, args.dataset),
+            args.gemma_model_pattern,
+        )
+    )
+    gemma_rows = filter_rows_by_model_pattern(
+        load_csv_rows(args.gemma_aggregates),
+        args.gemma_model_pattern,
+    )
+    hacked_rows = (
+        load_csv_rows(args.qwen_aggregates)
+        + load_csv_rows(args.llama_aggregates)
+        + gemma_rows
+    )
 
     if not history:
         raise SystemExit(
